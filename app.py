@@ -170,20 +170,38 @@ def get_tracks_from_db(days=7):
     
     cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
     
-    query = '''
-        SELECT track, artist, album, release_date, popularity, genres, played_at
-        FROM listening_history
-        WHERE played_at >= ?
-        ORDER BY played_at DESC
-    '''
+    # Try new schema first, fall back to old schema for migration
+    try:
+        query = '''
+            SELECT track_id, track_name, artist_ids, artist_names, album_id, album_name, 
+                   release_date, duration_ms, popularity, genres, played_at
+            FROM listening_history
+            WHERE played_at >= ?
+            ORDER BY played_at DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=(cutoff_date,))
+        
+        if not df.empty:
+            # Map to dashboard-friendly column names
+            df.columns = ['Track ID', 'Track', 'Artist IDs', 'Artist', 'Album ID', 'Album', 
+                         'Release Date', 'Duration (ms)', 'Popularity', 'Genres', 'Played At']
+    except sqlite3.OperationalError:
+        # Fall back to old schema
+        query = '''
+            SELECT track, artist, album, release_date, popularity, genres, played_at
+            FROM listening_history
+            WHERE played_at >= ?
+            ORDER BY played_at DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=(cutoff_date,))
+        if not df.empty:
+            df.columns = ['Track', 'Artist', 'Album', 'Release Date', 'Popularity', 'Genres', 'Played At']
     
-    df = pd.read_sql_query(query, conn, params=(cutoff_date,))
     conn.close()
     
     if df.empty:
         return df
     
-    df.columns = ['Track', 'Artist', 'Album', 'Release Date', 'Popularity', 'Genres', 'Played At']
     df['Played At'] = pd.to_datetime(df['Played At'])
     
     return df

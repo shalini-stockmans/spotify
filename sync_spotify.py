@@ -26,20 +26,53 @@ def init_database():
     """Initialize SQLite database for storing listening history"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    
+    # Create table with all metadata
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS listening_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            track TEXT NOT NULL,
-            artist TEXT NOT NULL,
-            album TEXT,
+            track_id TEXT,
+            track_name TEXT NOT NULL,
+            artist_ids TEXT,
+            artist_names TEXT NOT NULL,
+            album_id TEXT,
+            album_name TEXT,
             release_date TEXT,
+            duration_ms INTEGER,
             popularity INTEGER,
             genres TEXT,
             played_at TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Create indexes for faster queries
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_played_at ON listening_history(played_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_track_id ON listening_history(track_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON listening_history(created_at)')
+    
+    # Migrate old schema if needed (for existing databases)
+    try:
+        cursor.execute("SELECT track FROM listening_history LIMIT 1")
+        # Old schema exists, migrate it
+        print("Migrating database schema...")
+        cursor.execute('''
+            ALTER TABLE listening_history 
+            ADD COLUMN track_id TEXT
+        ''')
+    except sqlite3.OperationalError:
+        pass  # Column doesn't exist, will be created with new schema
+    
+    try:
+        cursor.execute("SELECT track_name FROM listening_history LIMIT 1")
+    except sqlite3.OperationalError:
+        # Need to migrate from old column names
+        try:
+            cursor.execute('ALTER TABLE listening_history RENAME COLUMN track TO track_name')
+            cursor.execute('ALTER TABLE listening_history RENAME COLUMN artist TO artist_names')
+        except sqlite3.OperationalError:
+            pass  # Already migrated or doesn't exist
+    
     conn.commit()
     conn.close()
 
@@ -52,11 +85,14 @@ def fetch_artist_genres(sp, artist_id):
         print(f"Error fetching genres for artist {artist_id}: {e}")
         return []
 
-def fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=False):
-    """Fetch recently played tracks from Spotify API with pagination"""
+def fetch_recently_played_paginated(sp, limit=50, max_batches=50, skip_genres=False):
+    """Fetch recently played tracks from Spotify API with pagination
+    Fetches ALL available tracks, not just 50. Continues until no more data.
+    """
     print(f"Fetching recently played tracks (limit={limit}, max_batches={max_batches}, skip_genres={skip_genres})...")
     all_tracks = []
     before_timestamp = None
+    total_fetched = 0
 
     for batch_num in range(max_batches):
         print(f"Fetching batch {batch_num + 1}/{max_batches}...")
@@ -71,12 +107,16 @@ def fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=Fa
 
             for item in recently_played['items']:
                 track = item['track']
+                track_id = track.get('id', '')
                 track_name = track['name']
-                artist_name = ", ".join(artist['name'] for artist in track['artists'])
+                artist_ids = ",".join([artist['id'] for artist in track['artists']])
+                artist_names = ", ".join([artist['name'] for artist in track['artists']])
                 played_at = item['played_at']
+                album_id = track['album'].get('id', '')
                 album_name = track['album']['name']
-                release_date = track['album']['release_date']
-                track_popularity = track['popularity']
+                release_date = track['album'].get('release_date', '')
+                duration_ms = track.get('duration_ms', 0)
+                track_popularity = track.get('popularity', 0)
                 
                 # Fetch genres for the first artist (skip if requested to speed up)
                 track_genres = []
@@ -87,28 +127,37 @@ def fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=Fa
                         print(f"Warning: Could not fetch genres for {track_name}: {e}")
 
                 all_tracks.append({
-                    "Track": track_name,
-                    "Artist": artist_name,
-                    "Album": album_name,
-                    "Release Date": release_date,
-                    "Popularity": track_popularity,
-                    "Genres": ", ".join(track_genres) if track_genres else "",
-                    "Played At": played_at
+                    "track_id": track_id,
+                    "track_name": track_name,
+                    "artist_ids": artist_ids,
+                    "artist_names": artist_names,
+                    "album_id": album_id,
+                    "album_name": album_name,
+                    "release_date": release_date,
+                    "duration_ms": duration_ms,
+                    "popularity": track_popularity,
+                    "genres": ", ".join(track_genres) if track_genres else "",
+                    "played_at": played_at
                 })
 
             # Use 'before' parameter with the oldest track's timestamp for next page
             if recently_played['items']:
                 oldest_timestamp = int(pd.to_datetime(recently_played['items'][-1]['played_at']).timestamp() * 1000)
                 if before_timestamp == oldest_timestamp:
+                    print(f"No more data available (reached end of history)")
                     break
                 before_timestamp = oldest_timestamp
+                total_fetched += len(recently_played['items'])
+                print(f"Batch {batch_num + 1}: Fetched {len(recently_played['items'])} tracks (total: {total_fetched})")
             else:
+                print(f"No more items in batch {batch_num + 1}")
                 break
                 
         except Exception as e:
             print(f"Error fetching recently played batch {batch_num + 1}: {e}")
             break
 
+    print(f"Total tracks fetched from API: {len(all_tracks)}")
     return all_tracks
 
 def sync_spotify_data():
@@ -218,25 +267,36 @@ def sync_spotify_data():
     
     for track in new_tracks:
         try:
+            # Use played_at as the unique identifier (Spotify provides exact timestamp)
             cursor.execute('''
                 INSERT OR IGNORE INTO listening_history 
-                (track, artist, album, release_date, popularity, genres, played_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (track_id, track_name, artist_ids, artist_names, album_id, album_name, 
+                 release_date, duration_ms, popularity, genres, played_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                track['Track'],
-                track['Artist'],
-                track['Album'],
-                track['Release Date'],
-                track['Popularity'],
-                track['Genres'],
-                track['Played At']
+                track['track_id'],
+                track['track_name'],
+                track['artist_ids'],
+                track['artist_names'],
+                track['album_id'],
+                track['album_name'],
+                track['release_date'],
+                track['duration_ms'],
+                track['popularity'],
+                track['genres'],
+                track['played_at']
             ))
             if cursor.rowcount > 0:
                 added_count += 1
             else:
                 skipped_count += 1
+        except sqlite3.IntegrityError as e:
+            # Duplicate played_at (already handled by UNIQUE constraint, but log it)
+            skipped_count += 1
         except Exception as e:
-            print(f"Error inserting track: {e}")
+            print(f"Error inserting track {track.get('track_name', 'Unknown')}: {e}")
+            import traceback
+            traceback.print_exc()
     
     conn.commit()
     conn.close()
