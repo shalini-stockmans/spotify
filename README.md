@@ -43,22 +43,17 @@ To get your Spotify API credentials:
 2. Log in with your Spotify account
 3. Create a new app
 4. Copy your Client ID and Client Secret
-5. Add a redirect URI (e.g., `http://localhost:8080`)
+5. Add a redirect URI (e.g., `http://localhost:3000`)
 
-### 3. Collect Listening Data
+### 3. Initialize Database
 
-First, run the `spotify.py` script to collect your listening data:
+The app uses SQLite database to store your listening history. The database will be created automatically when you first run the app.
+
+**Note**: The dashboard automatically syncs new tracks from Spotify API when you visit it. You can also manually sync by running:
 
 ```bash
-python spotify.py
+python sync_spotify.py
 ```
-
-This will:
-- Authenticate with Spotify
-- Fetch your recently played tracks
-- Save the data to `data/spotify_recently_played.xlsx`
-
-**Note**: You may need to run this script periodically to keep your data up to date. The dashboard will show data for the last 7 days from your collected data.
 
 ### 4. Run the Web Application
 
@@ -75,20 +70,27 @@ The dashboard will be available at: `http://localhost:5000`
 ```
 spotify/
 ├── app.py                      # Flask web application
-├── spotify.py                  # Script to fetch and save Spotify data
+├── sync_spotify.py             # Standalone script to sync Spotify data
+├── sync_spotify.bat            # Windows batch file for automation
+├── setup_windows_scheduler.ps1  # PowerShell script for Task Scheduler
 ├── requirements.txt            # Python dependencies
 ├── templates/
 │   └── dashboard.html         # Dashboard HTML template
-├── data/
-│   └── spotify_recently_played.xlsx  # Listening data storage
+├── .github/
+│   └── workflows/
+│       └── sync_spotify.yml   # GitHub Actions workflow
+├── spotify_history.db          # SQLite database (created automatically)
 └── README.md                   # This file
 ```
 
 ## Usage
 
-1. **Collect Data**: Run `spotify.py` to fetch your recently played tracks from Spotify
-2. **View Dashboard**: Start the Flask app with `python app.py` and open `http://localhost:5000` in your browser
-3. **Update Data**: Periodically run `spotify.py` to update your listening history
+1. **View Dashboard**: Start the Flask app with `python app.py` and open `http://localhost:5000` in your browser
+   - The dashboard automatically syncs new tracks from Spotify when you visit it
+2. **Manual Sync** (Optional): Run `python sync_spotify.py` to manually sync tracks
+3. **Automated Sync**: Set up automated syncing using GitHub Actions or Windows Task Scheduler (see `SETUP_AUTOMATION.md`)
+
+All data is stored in the SQLite database (`spotify_history.db`), which grows over time as you listen to music.
 
 ## Dashboard Features
 
@@ -124,8 +126,10 @@ A detailed table showing all your recent plays with:
 
 ### No Data Available
 If you see "No data available" error:
-- Make sure you've run `spotify.py` at least once to collect data
-- Check that the Excel file exists in `data/spotify_recently_played.xlsx`
+- Make sure you've visited the dashboard at least once (it auto-syncs on first visit)
+- Or manually run `python sync_spotify.py` to fetch data from Spotify
+- Check that the database file `spotify_history.db` exists in your project directory
+- Verify your Spotify credentials in `.env` are correct
 
 ### Authentication Issues
 If you encounter authentication errors:
