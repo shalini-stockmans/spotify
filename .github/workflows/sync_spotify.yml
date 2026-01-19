@@ -1,0 +1,51 @@
+name: Sync Spotify Listening Data
+
+on:
+  schedule:
+    # Run every hour at minute 0 (12:00, 1:00, 2:00, etc.)
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allows manual triggering from GitHub Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Set up environment variables
+      env:
+        CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+        REDIRECT_URL: ${{ secrets.SPOTIFY_REDIRECT_URL }}
+        SCOPE: ${{ secrets.SPOTIFY_SCOPE }}
+      run: |
+        echo "client_id=$CLIENT_ID" >> .env
+        echo "client_secret=$CLIENT_SECRET" >> .env
+        echo "redirect_url=$REDIRECT_URL" >> .env
+        echo "scope=$SCOPE" >> .env
+    
+    - name: Run Spotify sync script
+      run: python sync_spotify.py
+    
+    # Note: Database is created fresh each run. For persistent storage,
+    # consider using a hosted database or syncing the file back to your repo
+    - name: Optional - Commit database (if you want to track it in git)
+      run: |
+        git config --local user.email "actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add spotify_history.db || true
+        git commit -m "Update Spotify history database [skip ci]" || true
+        git push || true
+      continue-on-error: true

@@ -1,0 +1,46 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# Spotify cache (contains OAuth tokens)
+.cache
+.cache-*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+spotify_history.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (old Excel files)
+data/
+*.xlsx
+*.xls
+
+# Logs
+*.log
