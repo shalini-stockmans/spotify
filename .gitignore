@@ -7,11 +7,11 @@
 .cache
 .cache-*
 
-# Database files
+# Database files (except spotify_history.db which we track in git)
 *.db
+!spotify_history.db
 *.sqlite
 *.sqlite3
-spotify_history.db
 
 # Python
 __pycache__/

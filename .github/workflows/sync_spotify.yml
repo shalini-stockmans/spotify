@@ -9,10 +9,15 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to push commits back to the repository
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0  # Fetch full history for proper git operations
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -39,13 +44,15 @@ jobs:
     - name: Run Spotify sync script
       run: python sync_spotify.py
     
-    # Note: Database is created fresh each run. For persistent storage,
-    # consider using a hosted database or syncing the file back to your repo
-    - name: Optional - Commit database (if you want to track it in git)
+    - name: Commit and push database
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
-        git add spotify_history.db || true
-        git commit -m "Update Spotify history database [skip ci]" || true
-        git push || true
+        git add spotify_history.db
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update Spotify history database [skip ci]"
+          git push
+        fi
       continue-on-error: true
