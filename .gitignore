@@ -4,8 +4,9 @@
 .env.*.local
 
 # Spotify cache (contains OAuth tokens)
-.cache
-.cache-*
+# Note: We track cache files in git for GitHub Actions
+# .cache
+# .cache-*
 
 # Database files (except spotify_history.db which we track in git)
 *.db

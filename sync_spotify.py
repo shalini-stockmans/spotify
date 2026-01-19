@@ -52,12 +52,14 @@ def fetch_artist_genres(sp, artist_id):
         print(f"Error fetching genres for artist {artist_id}: {e}")
         return []
 
-def fetch_recently_played_paginated(sp, limit=50, max_batches=20):
+def fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=False):
     """Fetch recently played tracks from Spotify API with pagination"""
+    print(f"Fetching recently played tracks (limit={limit}, max_batches={max_batches}, skip_genres={skip_genres})...")
     all_tracks = []
     before_timestamp = None
 
     for batch_num in range(max_batches):
+        print(f"Fetching batch {batch_num + 1}/{max_batches}...")
         try:
             if before_timestamp:
                 recently_played = sp.current_user_recently_played(limit=limit, before=before_timestamp)
@@ -76,10 +78,13 @@ def fetch_recently_played_paginated(sp, limit=50, max_batches=20):
                 release_date = track['album']['release_date']
                 track_popularity = track['popularity']
                 
-                # Fetch genres for the first artist
+                # Fetch genres for the first artist (skip if requested to speed up)
                 track_genres = []
-                if track['artists']:
-                    track_genres = fetch_artist_genres(sp, track['artists'][0]['id'])
+                if not skip_genres and track['artists']:
+                    try:
+                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'])
+                    except Exception as e:
+                        print(f"Warning: Could not fetch genres for {track_name}: {e}")
 
                 all_tracks.append({
                     "Track": track_name,
@@ -110,23 +115,95 @@ def sync_spotify_data():
     """Sync new tracks from Spotify API to database"""
     print(f"[{datetime.now()}] Starting Spotify sync...")
     
+    # Check if running in CI/GitHub Actions (non-interactive environment)
+    is_ci = os.environ.get('CI') == 'true' or os.environ.get('GITHUB_ACTIONS') == 'true'
+    print(f"Running in CI environment: {is_ci}")
+    
+    # Validate credentials
+    if not client_id or not client_secret:
+        print("ERROR: Missing Spotify credentials (client_id or client_secret)")
+        return
+    
     # Initialize Spotify client
     try:
-        sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+        print("Initializing Spotify OAuth...")
+        # In CI, look for cache files in the repo
+        cache_path = None
+        if is_ci:
+            # Look for any .cache-* file in the repo
+            import glob
+            cache_files = glob.glob('.cache-*')
+            if cache_files:
+                cache_path = cache_files[0]
+                print(f"Found cache file: {cache_path}")
+            else:
+                print("WARNING: No cache file found in CI environment")
+        
+        auth_manager = SpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_url,
-            scope=scope
-        ))
+            scope=scope,
+            open_browser=False,  # Never open browser (especially in CI)
+            cache_path=cache_path or ".cache"  # Use found cache or default
+        )
+        
+        print("Attempting to get cached token...")
+        # Try to get token (will use cache if available)
+        token_info = auth_manager.get_cached_token()
+        
+        if not token_info:
+            if is_ci:
+                print("=" * 60)
+                print("ERROR: No cached token found in CI environment.")
+                print("Spotify OAuth requires interactive authentication.")
+                print("")
+                print("SOLUTION:")
+                print("1. Run 'python sync_spotify.py' locally to authenticate")
+                print("2. Find the .cache-* file created in your project")
+                print("3. Commit it: git add .cache-* && git commit -m 'Add OAuth cache'")
+                print("4. Push: git push")
+                print("=" * 60)
+                return
+            else:
+                print("No cached token found. Attempting to get new token...")
+                # Will prompt for authentication (only in local environment)
+                try:
+                    token_info = auth_manager.get_access_token()
+                except Exception as auth_error:
+                    print(f"Failed to get access token: {auth_error}")
+                    return
+        
+        if not token_info:
+            print("ERROR: Could not obtain authentication token")
+            return
+            
+        print("Token obtained successfully")
+        
+        # Test the connection
+        print("Creating Spotify client...")
+        sp = spotipy.Spotify(auth_manager=auth_manager)
+        
+        # Quick test to verify authentication works
+        print("Testing authentication with API call...")
+        try:
+            current_user = sp.current_user()
+            print(f"Authentication successful! Logged in as: {current_user.get('display_name', 'Unknown')}")
+        except Exception as test_error:
+            print(f"Authentication test failed: {test_error}")
+            return
+            
     except Exception as e:
         print(f"Spotify authentication error: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Initialize database
     init_database()
     
-    # Fetch new tracks
-    new_tracks = fetch_recently_played_paginated(sp, limit=50, max_batches=20)
+    # Fetch new tracks (skip genres in CI to speed up)
+    new_tracks = fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=is_ci)
     
     if not new_tracks:
         print("No tracks fetched from Spotify API")

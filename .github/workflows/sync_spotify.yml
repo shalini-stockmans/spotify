@@ -42,7 +42,11 @@ jobs:
         echo "scope=$SCOPE" >> .env
     
     - name: Run Spotify sync script
+      timeout-minutes: 10
       run: python sync_spotify.py
+      env:
+        GITHUB_ACTIONS: 'true'
+        CI: 'true'
     
     - name: Commit and push database
       run: |
