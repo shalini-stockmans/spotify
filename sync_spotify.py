@@ -46,32 +46,52 @@ def init_database():
         )
     ''')
     
-    # Create indexes for faster queries
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_played_at ON listening_history(played_at)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_track_id ON listening_history(track_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON listening_history(created_at)')
+    # Check existing columns to determine schema version
+    cursor.execute("PRAGMA table_info(listening_history)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
     
     # Migrate old schema if needed (for existing databases)
-    try:
-        cursor.execute("SELECT track FROM listening_history LIMIT 1")
-        # Old schema exists, migrate it
-        print("Migrating database schema...")
-        cursor.execute('''
-            ALTER TABLE listening_history 
-            ADD COLUMN track_id TEXT
-        ''')
-    except sqlite3.OperationalError:
-        pass  # Column doesn't exist, will be created with new schema
+    needs_migration = False
     
-    try:
-        cursor.execute("SELECT track_name FROM listening_history LIMIT 1")
-    except sqlite3.OperationalError:
-        # Need to migrate from old column names
+    # Check if old column names exist
+    if 'track' in existing_columns and 'track_name' not in existing_columns:
+        print("Migrating database schema: Renaming columns...")
         try:
             cursor.execute('ALTER TABLE listening_history RENAME COLUMN track TO track_name')
             cursor.execute('ALTER TABLE listening_history RENAME COLUMN artist TO artist_names')
-        except sqlite3.OperationalError:
-            pass  # Already migrated or doesn't exist
+            needs_migration = True
+        except sqlite3.OperationalError as e:
+            print(f"Migration warning: {e}")
+    
+    # Add new columns if they don't exist
+    new_columns = {
+        'track_id': 'TEXT',
+        'artist_ids': 'TEXT',
+        'album_id': 'TEXT',
+        'duration_ms': 'INTEGER'
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                print(f"Adding column: {col_name}")
+                cursor.execute(f'ALTER TABLE listening_history ADD COLUMN {col_name} {col_type}')
+                needs_migration = True
+            except sqlite3.OperationalError as e:
+                print(f"Warning: Could not add column {col_name}: {e}")
+    
+    if needs_migration:
+        print("Database migration completed")
+    
+    # Create indexes for faster queries (only on columns that exist)
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_played_at ON listening_history(played_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON listening_history(created_at)')
+    
+    # Only create track_id index if column exists
+    cursor.execute("PRAGMA table_info(listening_history)")
+    columns_after = [col[1] for col in cursor.fetchall()]
+    if 'track_id' in columns_after:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_track_id ON listening_history(track_id)')
     
     conn.commit()
     conn.close()
