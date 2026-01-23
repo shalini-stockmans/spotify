@@ -9,6 +9,7 @@ import os
 
 # US Central timezone
 CENTRAL_TZ = pytz.timezone('America/Chicago')
+UTC_TZ = pytz.UTC
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "spotify_history.db")
@@ -80,14 +81,32 @@ def view_database(limit=100, days=None):
             print("No records found in database.")
             return
         
-        # Format the played_at column (already in Central time)
+        # Format the played_at column (handle both UTC and Central time)
         if 'Played At' in df.columns:
-            df['Played At'] = pd.to_datetime(df['Played At'])
-            # Ensure timezone-aware (assume Central if not specified)
-            if df['Played At'].dt.tz is None:
-                df['Played At'] = df['Played At'].dt.tz_localize(CENTRAL_TZ)
-            else:
-                df['Played At'] = df['Played At'].dt.tz_convert(CENTRAL_TZ)
+            # Parse timestamps - handle mixed timezones
+            def parse_timestamp(ts):
+                try:
+                    dt = pd.to_datetime(ts)
+                    # If it ends with 'Z', it's UTC (old format)
+                    if isinstance(ts, str) and ts.endswith('Z'):
+                        if dt.tzinfo is None:
+                            dt = UTC_TZ.localize(dt)
+                        else:
+                            dt = dt.astimezone(UTC_TZ)
+                        # Convert to Central
+                        return dt.astimezone(CENTRAL_TZ)
+                    else:
+                        # Assume Central time (new format)
+                        if dt.tzinfo is None:
+                            return CENTRAL_TZ.localize(dt)
+                        else:
+                            return dt.astimezone(CENTRAL_TZ)
+                except:
+                    return pd.NaT
+            
+            # Apply parsing to handle mixed timezones
+            df['Played At'] = df['Played At'].apply(parse_timestamp)
+            
             # Format as Central time string
             df['Played At'] = df['Played At'].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
         

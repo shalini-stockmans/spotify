@@ -43,7 +43,12 @@ jobs:
     
     - name: Run Spotify sync script
       timeout-minutes: 10
-      run: python sync_spotify.py
+      run: |
+        echo "Checking for cache files..."
+        ls -la .cache-* 2>/dev/null || echo "No .cache-* files found"
+        echo ""
+        echo "Running sync script..."
+        python sync_spotify.py
       env:
         GITHUB_ACTIONS: 'true'
         CI: 'true'

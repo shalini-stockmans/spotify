@@ -291,21 +291,23 @@ def fetch_new_tracks_only(sp, skip_genres=False):
     """Fetch only NEW tracks that aren't in the database yet.
     Stops when we encounter songs we already have.
     """
+    print("=" * 60)
     print("Checking database for latest song...")
     latest_played_at = get_latest_played_at()
     
     if latest_played_at:
-        print(f"Latest song in database: {latest_played_at}")
+        print(f"✓ Latest song in database: {latest_played_at}")
         # Convert to UTC milliseconds for API comparison (handles both UTC and Central formats)
         latest_timestamp = parse_timestamp_to_utc_millis(latest_played_at)
         if latest_timestamp:
-            print(f"Latest timestamp (UTC): {latest_timestamp}")
+            print(f"✓ Latest timestamp (UTC ms): {latest_timestamp}")
         else:
-            print("Warning: Could not parse latest timestamp, fetching all")
+            print("⚠️  Warning: Could not parse latest timestamp, fetching all")
             latest_timestamp = None
     else:
-        print("Database is empty - fetching all available songs")
+        print("ℹ️  Database is empty - fetching all available songs")
         latest_timestamp = None
+    print("=" * 60)
     
     all_tracks = []
     before_timestamp = None
@@ -378,10 +380,11 @@ def fetch_new_tracks_only(sp, skip_genres=False):
                 batch_new_count += 1
             
             if found_existing:
-                print(f"Stopping fetch - reached existing songs. Total new songs found: {len(all_tracks)}")
+                print(f"⏹️  Stopping fetch - reached existing songs.")
+                print(f"   Total new songs found: {len(all_tracks)}")
                 break
             
-            print(f"Batch {batch_num + 1}: Found {batch_new_count} new songs (total so far: {len(all_tracks)})")
+            print(f"✓ Batch {batch_num + 1}: Found {batch_new_count} new songs (total so far: {len(all_tracks)})")
             
             # Get timestamp for next batch
             if recently_played['items']:
@@ -393,18 +396,25 @@ def fetch_new_tracks_only(sp, skip_genres=False):
                 break
                 
         except Exception as e:
-            print(f"Error fetching batch {batch_num + 1}: {e}")
+            print(f"❌ Error fetching batch {batch_num + 1}: {e}")
+            import traceback
+            traceback.print_exc()
             break
     
+    print(f"✓ Fetch complete: Found {len(all_tracks)} new tracks total")
     return all_tracks
 
 def sync_spotify_data():
     """Sync new tracks from Spotify API to database - only adds NEW songs"""
+    print("=" * 60)
     print(f"[{datetime.now()}] Starting Spotify sync...")
+    print("=" * 60)
     
     # Check if running in CI/GitHub Actions (non-interactive environment)
     is_ci = os.environ.get('CI') == 'true' or os.environ.get('GITHUB_ACTIONS') == 'true'
     print(f"Running in CI environment: {is_ci}")
+    print(f"Database file: {DB_FILE}")
+    print(f"Database exists: {os.path.exists(DB_FILE)}")
     
     # Validate credentials
     if not client_id or not client_secret:
@@ -417,14 +427,24 @@ def sync_spotify_data():
         # In CI, look for cache files in the repo
         cache_path = None
         if is_ci:
-            # Look for any .cache-* file in the repo
+            # Look for any .cache or .cache-* file in the repo
             import glob
-            cache_files = glob.glob('.cache-*')
+            cache_files = glob.glob('.cache') + glob.glob('.cache-*')
             if cache_files:
                 cache_path = cache_files[0]
-                print(f"Found cache file: {cache_path}")
+                print(f"✓ Found cache file: {cache_path}")
             else:
-                print("WARNING: No cache file found in CI environment")
+                print("=" * 60)
+                print("⚠️  WARNING: No cache file found in CI environment")
+                print("=" * 60)
+                print("The sync will fail without a cached OAuth token.")
+                print("")
+                print("SOLUTION:")
+                print("1. Run 'python sync_spotify.py' locally to authenticate")
+                print("2. Find the .cache or .cache-* file created in your project")
+                print("3. Commit it: git add .cache .cache-* && git commit -m 'Add OAuth cache'")
+                print("4. Push: git push")
+                print("=" * 60)
         
         auth_manager = SpotifyOAuth(
             client_id=client_id,
@@ -493,7 +513,10 @@ def sync_spotify_data():
     new_tracks = fetch_new_tracks_only(sp, skip_genres=is_ci)
     
     if not new_tracks:
-        print("No new tracks found - database is up to date!")
+        print("=" * 60)
+        print("INFO: No new tracks found - database is up to date!")
+        print("This means all recent songs are already in the database.")
+        print("=" * 60)
         return
     
     print(f"Found {len(new_tracks)} new tracks to add")
@@ -584,8 +607,12 @@ def sync_spotify_data():
     conn.commit()
     conn.close()
     
-    print(f"[{datetime.now()}] Sync complete: {added_count} new tracks added, {skipped_count} skipped")
-    print(f"Total tracks in database: {total_count}")
+    print("=" * 60)
+    print(f"[{datetime.now()}] Sync complete!")
+    print(f"  - {added_count} new tracks added")
+    print(f"  - {skipped_count} tracks skipped (duplicates)")
+    print(f"  - Total tracks in database: {total_count}")
+    print("=" * 60)
 
 if __name__ == '__main__':
     sync_spotify_data()
