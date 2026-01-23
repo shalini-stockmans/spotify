@@ -4,7 +4,11 @@ Database Viewer - View your Spotify listening history in a table format
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import pytz
 import os
+
+# US Central timezone
+CENTRAL_TZ = pytz.timezone('America/Chicago')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "spotify_history.db")
@@ -54,7 +58,9 @@ def view_database(limit=100, days=None):
     where_clause = ""
     params = []
     if days:
-        cutoff_date = (datetime.now() - pd.Timedelta(days=days)).isoformat()
+        # Calculate cutoff date in Central time
+        central_now = datetime.now(CENTRAL_TZ)
+        cutoff_date = (central_now - pd.Timedelta(days=days)).isoformat()
         where_clause = "WHERE played_at >= ?"
         params.append(cutoff_date)
     
@@ -74,10 +80,16 @@ def view_database(limit=100, days=None):
             print("No records found in database.")
             return
         
-        # Format the played_at column
+        # Format the played_at column (already in Central time)
         if 'Played At' in df.columns:
             df['Played At'] = pd.to_datetime(df['Played At'])
-            df['Played At'] = df['Played At'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Ensure timezone-aware (assume Central if not specified)
+            if df['Played At'].dt.tz is None:
+                df['Played At'] = df['Played At'].dt.tz_localize(CENTRAL_TZ)
+            else:
+                df['Played At'] = df['Played At'].dt.tz_convert(CENTRAL_TZ)
+            # Format as Central time string
+            df['Played At'] = df['Played At'].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
         
         # Format duration
         if 'Duration (ms)' in df.columns:

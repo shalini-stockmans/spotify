@@ -8,7 +8,12 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import pandas as pd
 from datetime import datetime, timedelta
+import pytz
 from dotenv import load_dotenv
+
+# US Central timezone
+CENTRAL_TZ = pytz.timezone('America/Chicago')
+UTC_TZ = pytz.UTC
 
 load_dotenv()
 
@@ -180,8 +185,159 @@ def fetch_recently_played_paginated(sp, limit=50, max_batches=50, skip_genres=Fa
     print(f"Total tracks fetched from API: {len(all_tracks)}")
     return all_tracks
 
+def convert_to_central(utc_timestamp_str):
+    """Convert UTC timestamp string to US Central timezone"""
+    try:
+        # Parse the UTC timestamp from Spotify (ISO format)
+        utc_dt = pd.to_datetime(utc_timestamp_str)
+        # Ensure it's timezone-aware (UTC)
+        if utc_dt.tzinfo is None:
+            utc_dt = UTC_TZ.localize(utc_dt)
+        else:
+            utc_dt = utc_dt.astimezone(UTC_TZ)
+        # Convert to Central time
+        central_dt = utc_dt.astimezone(CENTRAL_TZ)
+        # Return as ISO string for storage
+        return central_dt.isoformat()
+    except Exception as e:
+        print(f"Warning: Could not convert timestamp {utc_timestamp_str}: {e}")
+        return utc_timestamp_str  # Return original if conversion fails
+
+def get_latest_played_at():
+    """Get the most recent played_at timestamp from database (in Central time)"""
+    if not os.path.exists(DB_FILE):
+        return None
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT MAX(played_at) FROM listening_history")
+        result = cursor.fetchone()
+        latest = result[0] if result and result[0] else None
+        return latest
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+def fetch_new_tracks_only(sp, skip_genres=False):
+    """Fetch only NEW tracks that aren't in the database yet.
+    Stops when we encounter songs we already have.
+    """
+    print("Checking database for latest song...")
+    latest_played_at = get_latest_played_at()
+    
+    if latest_played_at:
+        print(f"Latest song in database: {latest_played_at} (Central Time)")
+        # Convert Central time back to UTC for API comparison
+        # Parse the Central time string and convert to UTC timestamp
+        try:
+            central_dt = pd.to_datetime(latest_played_at)
+            # If it has timezone info, convert to UTC; otherwise assume it's Central
+            if central_dt.tzinfo is None:
+                central_dt = CENTRAL_TZ.localize(central_dt)
+            else:
+                central_dt = central_dt.astimezone(CENTRAL_TZ)
+            # Convert to UTC for API comparison
+            utc_dt = central_dt.astimezone(UTC_TZ)
+            latest_timestamp = int(utc_dt.timestamp() * 1000)
+        except Exception as e:
+            print(f"Warning: Could not parse latest timestamp, fetching all: {e}")
+            latest_timestamp = None
+    else:
+        print("Database is empty - fetching all available songs")
+        latest_timestamp = None
+    
+    all_tracks = []
+    before_timestamp = None
+    found_existing = False
+    
+    print("Fetching new tracks from Spotify...")
+    
+    # Fetch in batches until we hit songs we already have
+    for batch_num in range(50):  # Max 50 batches (2500 songs)
+        try:
+            if before_timestamp:
+                recently_played = sp.current_user_recently_played(limit=50, before=before_timestamp)
+            else:
+                recently_played = sp.current_user_recently_played(limit=50)
+            
+            if not recently_played['items']:
+                print(f"Batch {batch_num + 1}: No more items from Spotify API")
+                break
+            
+            batch_new_count = 0
+            for item in recently_played['items']:
+                played_at = item['played_at']
+                played_timestamp = int(pd.to_datetime(played_at).timestamp() * 1000)
+                
+                # If we've reached songs we already have, stop
+                if latest_timestamp and played_timestamp <= latest_timestamp:
+                    print(f"Reached existing songs (played_at: {played_at} <= {latest_played_at})")
+                    found_existing = True
+                    break
+                
+                # This is a new song - process it
+                track = item['track']
+                track_id = track.get('id', '')
+                track_name = track['name']
+                artist_ids = ",".join([artist['id'] for artist in track['artists']])
+                artist_names = ", ".join([artist['name'] for artist in track['artists']])
+                album_id = track['album'].get('id', '')
+                album_name = track['album']['name']
+                release_date = track['album'].get('release_date', '')
+                duration_ms = track.get('duration_ms', 0)
+                track_popularity = track.get('popularity', 0)
+                
+                # Convert played_at from UTC to Central time
+                played_at_central = convert_to_central(played_at)
+                
+                # Fetch genres (skip in CI to speed up)
+                track_genres = []
+                if not skip_genres and track['artists']:
+                    try:
+                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'])
+                    except Exception as e:
+                        pass  # Skip genre fetch on error
+                
+                all_tracks.append({
+                    "track_id": track_id,
+                    "track_name": track_name,
+                    "artist_ids": artist_ids,
+                    "artist_names": artist_names,
+                    "album_id": album_id,
+                    "album_name": album_name,
+                    "release_date": release_date,
+                    "duration_ms": duration_ms,
+                    "popularity": track_popularity,
+                    "genres": ", ".join(track_genres) if track_genres else "",
+                    "played_at": played_at_central  # Store in Central time
+                })
+                batch_new_count += 1
+            
+            if found_existing:
+                break
+            
+            print(f"Batch {batch_num + 1}: Found {batch_new_count} new songs (total: {len(all_tracks)})")
+            
+            # Get timestamp for next batch
+            if recently_played['items']:
+                oldest_timestamp = int(pd.to_datetime(recently_played['items'][-1]['played_at']).timestamp() * 1000)
+                if before_timestamp == oldest_timestamp:
+                    break
+                before_timestamp = oldest_timestamp
+            else:
+                break
+                
+        except Exception as e:
+            print(f"Error fetching batch {batch_num + 1}: {e}")
+            break
+    
+    return all_tracks
+
 def sync_spotify_data():
-    """Sync new tracks from Spotify API to database"""
+    """Sync new tracks from Spotify API to database - only adds NEW songs"""
     print(f"[{datetime.now()}] Starting Spotify sync...")
     
     # Check if running in CI/GitHub Actions (non-interactive environment)
@@ -271,12 +427,14 @@ def sync_spotify_data():
     # Initialize database
     init_database()
     
-    # Fetch new tracks (skip genres in CI to speed up)
-    new_tracks = fetch_recently_played_paginated(sp, limit=50, max_batches=20, skip_genres=is_ci)
+    # Fetch ONLY new tracks (stops when it hits existing songs)
+    new_tracks = fetch_new_tracks_only(sp, skip_genres=is_ci)
     
     if not new_tracks:
-        print("No tracks fetched from Spotify API")
+        print("No new tracks found - database is up to date!")
         return
+    
+    print(f"Found {len(new_tracks)} new tracks to add")
     
     # Save to database
     conn = sqlite3.connect(DB_FILE)
@@ -288,41 +446,65 @@ def sync_spotify_data():
     for track in new_tracks:
         try:
             # Use played_at as the unique identifier (Spotify provides exact timestamp)
-            cursor.execute('''
-                INSERT OR IGNORE INTO listening_history 
-                (track_id, track_name, artist_ids, artist_names, album_id, album_name, 
-                 release_date, duration_ms, popularity, genres, played_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                track['track_id'],
-                track['track_name'],
-                track['artist_ids'],
-                track['artist_names'],
-                track['album_id'],
-                track['album_name'],
-                track['release_date'],
-                track['duration_ms'],
-                track['popularity'],
-                track['genres'],
-                track['played_at']
-            ))
+            # Check which schema we're using
+            cursor.execute("PRAGMA table_info(listening_history)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            if 'track_name' in columns:
+                # New schema
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track_id, track_name, artist_ids, artist_names, album_id, album_name, 
+                     release_date, duration_ms, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['track_id'],
+                    track['track_name'],
+                    track['artist_ids'],
+                    track['artist_names'],
+                    track['album_id'],
+                    track['album_name'],
+                    track['release_date'],
+                    track['duration_ms'],
+                    track['popularity'],
+                    track['genres'],
+                    track['played_at']
+                ))
+            else:
+                # Old schema
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track, artist, album, release_date, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['track_name'],
+                    track['artist_names'],
+                    track['album_name'],
+                    track['release_date'],
+                    track['popularity'],
+                    track['genres'],
+                    track['played_at']
+                ))
+            
             if cursor.rowcount > 0:
                 added_count += 1
             else:
                 skipped_count += 1
-        except sqlite3.IntegrityError as e:
-            # Duplicate played_at (already handled by UNIQUE constraint, but log it)
+        except sqlite3.IntegrityError:
+            # Duplicate played_at (already handled by UNIQUE constraint)
             skipped_count += 1
         except Exception as e:
             print(f"Error inserting track {track.get('track_name', 'Unknown')}: {e}")
-            import traceback
-            traceback.print_exc()
+    
+    # Get total count before closing
+    cursor.execute("SELECT COUNT(*) FROM listening_history")
+    total_count = cursor.fetchone()[0]
     
     conn.commit()
     conn.close()
     
-    print(f"[{datetime.now()}] Sync complete: {added_count} new tracks added, {skipped_count} duplicates skipped")
-    print(f"Total tracks fetched: {len(new_tracks)}")
+    print(f"[{datetime.now()}] Sync complete: {added_count} new tracks added, {skipped_count} skipped")
+    print(f"Total tracks in database: {total_count}")
 
 if __name__ == '__main__':
     sync_spotify_data()

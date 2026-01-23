@@ -6,7 +6,11 @@ import os
 import sqlite3
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+import pytz
 from dotenv import load_dotenv
+
+# US Central timezone
+CENTRAL_TZ = pytz.timezone('America/Chicago')
 
 load_dotenv()
 
@@ -168,7 +172,9 @@ def get_tracks_from_db(days=7):
     """Get tracks from database for the specified number of days"""
     conn = sqlite3.connect(DB_FILE)
     
-    cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+    # Calculate cutoff date in Central time
+    central_now = datetime.now(CENTRAL_TZ)
+    cutoff_date = (central_now - timedelta(days=days)).isoformat()
     
     # Try new schema first, fall back to old schema for migration
     try:
@@ -202,7 +208,13 @@ def get_tracks_from_db(days=7):
     if df.empty:
         return df
     
+    # Parse timestamps (already in Central time from database)
     df['Played At'] = pd.to_datetime(df['Played At'])
+    # Ensure timezone-aware (assume Central if not specified)
+    if df['Played At'].dt.tz is None:
+        df['Played At'] = df['Played At'].dt.tz_localize(CENTRAL_TZ)
+    else:
+        df['Played At'] = df['Played At'].dt.tz_convert(CENTRAL_TZ)
     
     return df
 
