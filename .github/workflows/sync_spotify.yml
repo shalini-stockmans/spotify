@@ -57,11 +57,12 @@ jobs:
       run: |
         git config --local user.email "actions@github.com"
         git config --local user.name "GitHub Actions"
+        git pull --rebase origin main || true
         git add spotify_history.db
         if git diff --staged --quiet; then
           echo "No changes to commit"
         else
           git commit -m "Update Spotify history database [skip ci]"
-          git push
+          git push origin main
         fi
       continue-on-error: true
