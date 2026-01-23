@@ -58,21 +58,58 @@ def init_database():
     # Migrate old schema if needed (for existing databases)
     needs_migration = False
     
-    # Check if old column names exist
+    # Check if old column names exist and need renaming
     if 'track' in existing_columns and 'track_name' not in existing_columns:
         print("Migrating database schema: Renaming columns...")
         try:
             cursor.execute('ALTER TABLE listening_history RENAME COLUMN track TO track_name')
+            needs_migration = True
+        except sqlite3.OperationalError as e:
+            print(f"Migration warning (track->track_name): {e}")
+    
+    if 'artist' in existing_columns and 'artist_names' not in existing_columns:
+        try:
             cursor.execute('ALTER TABLE listening_history RENAME COLUMN artist TO artist_names')
             needs_migration = True
         except sqlite3.OperationalError as e:
-            print(f"Migration warning: {e}")
+            print(f"Migration warning (artist->artist_names): {e}")
+    
+    # Handle album column - add album_name if it doesn't exist
+    if 'album_name' not in existing_columns:
+        if 'album' in existing_columns:
+            # Try to rename first (SQLite 3.25.0+)
+            try:
+                cursor.execute('ALTER TABLE listening_history RENAME COLUMN album TO album_name')
+                needs_migration = True
+                print("Renamed album to album_name")
+            except sqlite3.OperationalError:
+                # If rename fails, add new column and copy data
+                try:
+                    cursor.execute('ALTER TABLE listening_history ADD COLUMN album_name TEXT')
+                    cursor.execute('UPDATE listening_history SET album_name = album WHERE album_name IS NULL')
+                    needs_migration = True
+                    print("Added album_name column and copied data from album")
+                except sqlite3.OperationalError as e:
+                    print(f"Warning: Could not migrate album column: {e}")
+        else:
+            # No album column at all, just add album_name
+            try:
+                cursor.execute('ALTER TABLE listening_history ADD COLUMN album_name TEXT')
+                needs_migration = True
+                print("Added album_name column")
+            except sqlite3.OperationalError as e:
+                print(f"Warning: Could not add album_name column: {e}")
+    
+    # Refresh column list after renaming
+    cursor.execute("PRAGMA table_info(listening_history)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
     
     # Add new columns if they don't exist
     new_columns = {
         'track_id': 'TEXT',
         'artist_ids': 'TEXT',
         'album_id': 'TEXT',
+        'album_name': 'TEXT',  # In case it doesn't exist after migration
         'duration_ms': 'INTEGER'
     }
     
@@ -204,7 +241,9 @@ def convert_to_central(utc_timestamp_str):
         return utc_timestamp_str  # Return original if conversion fails
 
 def get_latest_played_at():
-    """Get the most recent played_at timestamp from database (in Central time)"""
+    """Get the most recent played_at timestamp from database.
+    Returns the raw timestamp string (could be UTC or Central).
+    """
     if not os.path.exists(DB_FILE):
         return None
     
@@ -221,6 +260,33 @@ def get_latest_played_at():
     finally:
         conn.close()
 
+def parse_timestamp_to_utc_millis(timestamp_str):
+    """Parse a timestamp string (UTC or Central) and return UTC milliseconds for API comparison"""
+    try:
+        # Parse the timestamp
+        dt = pd.to_datetime(timestamp_str)
+        
+        # If it ends with 'Z', it's UTC
+        if timestamp_str.endswith('Z') or '+00:00' in timestamp_str:
+            # Already UTC
+            if dt.tzinfo is None:
+                dt = UTC_TZ.localize(dt)
+            else:
+                dt = dt.astimezone(UTC_TZ)
+        else:
+            # Assume it's Central time (new format)
+            if dt.tzinfo is None:
+                dt = CENTRAL_TZ.localize(dt)
+            else:
+                dt = dt.astimezone(CENTRAL_TZ)
+            # Convert to UTC
+            dt = dt.astimezone(UTC_TZ)
+        
+        return int(dt.timestamp() * 1000)
+    except Exception as e:
+        print(f"Warning: Could not parse timestamp {timestamp_str}: {e}")
+        return None
+
 def fetch_new_tracks_only(sp, skip_genres=False):
     """Fetch only NEW tracks that aren't in the database yet.
     Stops when we encounter songs we already have.
@@ -229,21 +295,13 @@ def fetch_new_tracks_only(sp, skip_genres=False):
     latest_played_at = get_latest_played_at()
     
     if latest_played_at:
-        print(f"Latest song in database: {latest_played_at} (Central Time)")
-        # Convert Central time back to UTC for API comparison
-        # Parse the Central time string and convert to UTC timestamp
-        try:
-            central_dt = pd.to_datetime(latest_played_at)
-            # If it has timezone info, convert to UTC; otherwise assume it's Central
-            if central_dt.tzinfo is None:
-                central_dt = CENTRAL_TZ.localize(central_dt)
-            else:
-                central_dt = central_dt.astimezone(CENTRAL_TZ)
-            # Convert to UTC for API comparison
-            utc_dt = central_dt.astimezone(UTC_TZ)
-            latest_timestamp = int(utc_dt.timestamp() * 1000)
-        except Exception as e:
-            print(f"Warning: Could not parse latest timestamp, fetching all: {e}")
+        print(f"Latest song in database: {latest_played_at}")
+        # Convert to UTC milliseconds for API comparison (handles both UTC and Central formats)
+        latest_timestamp = parse_timestamp_to_utc_millis(latest_played_at)
+        if latest_timestamp:
+            print(f"Latest timestamp (UTC): {latest_timestamp}")
+        else:
+            print("Warning: Could not parse latest timestamp, fetching all")
             latest_timestamp = None
     else:
         print("Database is empty - fetching all available songs")
@@ -274,7 +332,10 @@ def fetch_new_tracks_only(sp, skip_genres=False):
                 
                 # If we've reached songs we already have, stop
                 if latest_timestamp and played_timestamp <= latest_timestamp:
-                    print(f"Reached existing songs (played_at: {played_at} <= {latest_played_at})")
+                    print(f"Reached existing songs in batch {batch_num + 1}")
+                    print(f"  API song timestamp (UTC): {played_timestamp}")
+                    print(f"  Database latest (UTC): {latest_timestamp}")
+                    print(f"  Difference: {latest_timestamp - played_timestamp} ms")
                     found_existing = True
                     break
                 
@@ -317,9 +378,10 @@ def fetch_new_tracks_only(sp, skip_genres=False):
                 batch_new_count += 1
             
             if found_existing:
+                print(f"Stopping fetch - reached existing songs. Total new songs found: {len(all_tracks)}")
                 break
             
-            print(f"Batch {batch_num + 1}: Found {batch_new_count} new songs (total: {len(all_tracks)})")
+            print(f"Batch {batch_num + 1}: Found {batch_new_count} new songs (total so far: {len(all_tracks)})")
             
             # Get timestamp for next batch
             if recently_played['items']:
@@ -440,18 +502,22 @@ def sync_spotify_data():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
+    # Check schema once before the loop (more efficient)
+    cursor.execute("PRAGMA table_info(listening_history)")
+    columns = [col[1] for col in cursor.fetchall()]
+    has_new_schema = 'track_name' in columns
+    has_album_name = 'album_name' in columns
+    
+    print(f"Database schema: new_schema={has_new_schema}, has_album_name={has_album_name}")
+    
     added_count = 0
     skipped_count = 0
     
     for track in new_tracks:
         try:
             # Use played_at as the unique identifier (Spotify provides exact timestamp)
-            # Check which schema we're using
-            cursor.execute("PRAGMA table_info(listening_history)")
-            columns = [col[1] for col in cursor.fetchall()]
-            
-            if 'track_name' in columns:
-                # New schema
+            if has_new_schema:
+                # New schema - use all columns
                 cursor.execute('''
                     INSERT OR IGNORE INTO listening_history 
                     (track_id, track_name, artist_ids, artist_names, album_id, album_name, 
@@ -470,8 +536,23 @@ def sync_spotify_data():
                     track['genres'],
                     track['played_at']
                 ))
+            elif has_album_name:
+                # Partially migrated - has album_name but not track_name
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track, artist, album_name, release_date, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['track_name'],
+                    track['artist_names'],
+                    track['album_name'],
+                    track['release_date'],
+                    track['popularity'],
+                    track['genres'],
+                    track['played_at']
+                ))
             else:
-                # Old schema
+                # Old schema - use old column names (album instead of album_name)
                 cursor.execute('''
                     INSERT OR IGNORE INTO listening_history 
                     (track, artist, album, release_date, popularity, genres, played_at)
