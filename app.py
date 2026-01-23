@@ -42,19 +42,77 @@ def init_database():
     """Initialize SQLite database for storing listening history"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    
+    # Create table with new schema
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS listening_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            track TEXT NOT NULL,
-            artist TEXT NOT NULL,
-            album TEXT,
+            track_id TEXT,
+            track_name TEXT NOT NULL,
+            artist_ids TEXT,
+            artist_names TEXT NOT NULL,
+            album_id TEXT,
+            album_name TEXT,
             release_date TEXT,
+            duration_ms INTEGER,
             popularity INTEGER,
             genres TEXT,
             played_at TEXT NOT NULL UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Check existing columns to determine schema version
+    cursor.execute("PRAGMA table_info(listening_history)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    # Migrate old schema if needed
+    if 'track' in existing_columns and 'track_name' not in existing_columns:
+        try:
+            cursor.execute('ALTER TABLE listening_history RENAME COLUMN track TO track_name')
+        except sqlite3.OperationalError:
+            pass
+    
+    if 'artist' in existing_columns and 'artist_names' not in existing_columns:
+        try:
+            cursor.execute('ALTER TABLE listening_history RENAME COLUMN artist TO artist_names')
+        except sqlite3.OperationalError:
+            pass
+    
+    if 'album_name' not in existing_columns:
+        if 'album' in existing_columns:
+            try:
+                cursor.execute('ALTER TABLE listening_history RENAME COLUMN album TO album_name')
+            except sqlite3.OperationalError:
+                try:
+                    cursor.execute('ALTER TABLE listening_history ADD COLUMN album_name TEXT')
+                    cursor.execute('UPDATE listening_history SET album_name = album WHERE album_name IS NULL')
+                except sqlite3.OperationalError:
+                    pass
+        else:
+            try:
+                cursor.execute('ALTER TABLE listening_history ADD COLUMN album_name TEXT')
+            except sqlite3.OperationalError:
+                pass
+    
+    # Add new columns if they don't exist
+    new_columns = {
+        'track_id': 'TEXT',
+        'artist_ids': 'TEXT',
+        'album_id': 'TEXT',
+        'duration_ms': 'INTEGER'
+    }
+    
+    cursor.execute("PRAGMA table_info(listening_history)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cursor.execute(f'ALTER TABLE listening_history ADD COLUMN {col_name} {col_type}')
+            except sqlite3.OperationalError:
+                pass
+    
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_played_at ON listening_history(played_at)')
     conn.commit()
     conn.close()
@@ -143,22 +201,60 @@ def sync_spotify_data():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
+    # Check schema once before the loop
+    cursor.execute("PRAGMA table_info(listening_history)")
+    columns = [col[1] for col in cursor.fetchall()]
+    has_new_schema = 'track_name' in columns
+    has_album_name = 'album_name' in columns
+    
     added_count = 0
     for track in new_tracks:
         try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO listening_history 
-                (track, artist, album, release_date, popularity, genres, played_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                track['Track'],
-                track['Artist'],
-                track['Album'],
-                track['Release Date'],
-                track['Popularity'],
-                track['Genres'],
-                track['Played At']
-            ))
+            if has_new_schema:
+                # New schema - use all columns
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track_name, artist_names, album_name, release_date, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['Track'],
+                    track['Artist'],
+                    track['Album'],
+                    track['Release Date'],
+                    track['Popularity'],
+                    track['Genres'],
+                    track['Played At']
+                ))
+            elif has_album_name:
+                # Partially migrated - has album_name but not track_name
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track, artist, album_name, release_date, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['Track'],
+                    track['Artist'],
+                    track['Album'],
+                    track['Release Date'],
+                    track['Popularity'],
+                    track['Genres'],
+                    track['Played At']
+                ))
+            else:
+                # Old schema - use old column names
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listening_history 
+                    (track, artist, album, release_date, popularity, genres, played_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    track['Track'],
+                    track['Artist'],
+                    track['Album'],
+                    track['Release Date'],
+                    track['Popularity'],
+                    track['Genres'],
+                    track['Played At']
+                ))
             if cursor.rowcount > 0:
                 added_count += 1
         except Exception as e:
@@ -208,22 +304,35 @@ def get_tracks_from_db(days=7):
     if df.empty:
         return df
     
-    # Parse timestamps (already in Central time from database)
-    df['Played At'] = pd.to_datetime(df['Played At'])
-    # Ensure timezone-aware (assume Central if not specified)
-    if df['Played At'].dt.tz is None:
-        df['Played At'] = df['Played At'].dt.tz_localize(CENTRAL_TZ)
-    else:
-        df['Played At'] = df['Played At'].dt.tz_convert(CENTRAL_TZ)
+    # Parse timestamps - handle mixed timezones (UTC and Central)
+    def parse_timestamp(ts):
+        try:
+            dt = pd.to_datetime(ts)
+            # If it ends with 'Z', it's UTC (old format)
+            if isinstance(ts, str) and ts.endswith('Z'):
+                if dt.tzinfo is None:
+                    dt = pytz.UTC.localize(dt)
+                else:
+                    dt = dt.astimezone(pytz.UTC)
+                # Convert to Central
+                return dt.astimezone(CENTRAL_TZ)
+            else:
+                # Assume Central time (new format)
+                if dt.tzinfo is None:
+                    return CENTRAL_TZ.localize(dt)
+                else:
+                    return dt.astimezone(CENTRAL_TZ)
+        except:
+            return pd.NaT
+    
+    # Apply parsing to handle mixed timezones
+    df['Played At'] = df['Played At'].apply(parse_timestamp)
     
     return df
 
 def get_last_7_days_data():
-    """Get last 7 days of listening data from database"""
-    # Sync new tracks from API first
-    sync_spotify_data()
-    
-    # Get tracks from database
+    """Get last 7 days of listening data from database only (no API sync)"""
+    # Only read from database - syncing is handled by sync_spotify.py
     df = get_tracks_from_db(days=7)
     
     return df
@@ -252,12 +361,8 @@ def dashboard():
 
 @app.route('/api/data')
 def get_data():
-    """API endpoint to get last 7 days of listening data"""
-    if sp is None:
-        return jsonify({
-            'error': 'Spotify authentication failed. Please check your credentials in .env file.'
-        }), 500
-    
+    """API endpoint to get last 7 days of listening data from database"""
+    # No need to check sp - we're reading from database only
     df_last_7 = get_last_7_days_data()
     
     if df_last_7.empty:
@@ -279,8 +384,12 @@ def get_data():
     # Clean all values for JSON serialization
     cleaned_data = [clean_for_json(record) for record in data]
     
+    # Limit to last 15 tracks for recent plays table
+    recent_15 = cleaned_data[:15] if len(cleaned_data) > 15 else cleaned_data
+    
     return jsonify({
-        'data': cleaned_data,
+        'data': cleaned_data,  # All data for stats
+        'recent_plays': recent_15,  # Last 15 for table
         'total_tracks': len(df_last_7),
         'date_range': {
             'start': (datetime.now() - timedelta(days=7)).isoformat(),
@@ -290,12 +399,8 @@ def get_data():
 
 @app.route('/api/stats')
 def get_stats():
-    """API endpoint to get aggregated statistics"""
-    if sp is None:
-        return jsonify({
-            'error': 'Spotify authentication failed. Please check your credentials in .env file.'
-        }), 500
-    
+    """API endpoint to get aggregated statistics from database"""
+    # No need to check sp - we're reading from database only
     df_last_7 = get_last_7_days_data()
     
     if df_last_7.empty:

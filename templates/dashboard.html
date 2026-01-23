@@ -194,7 +194,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🎵 Spotify Listening Dashboard</h1>
+            <h1>Spotify Listening Dashboard</h1>
             <p class="subtitle">Your Last 7 Days of Music</p>
         </header>
 
@@ -252,7 +252,7 @@
             </div>
 
             <div class="table-container">
-                <div class="table-title">Recent Plays</div>
+                <div class="table-title">Recent Plays (Last 15 Tracks)</div>
                 <div style="overflow-x: auto;">
                     <table id="tracksTable">
                         <thead>
@@ -260,8 +260,9 @@
                                 <th>Track</th>
                                 <th>Artist</th>
                                 <th>Album</th>
-                                <th>Genres</th>
+                                <th>Release Date</th>
                                 <th>Popularity</th>
+                                <th>Genres</th>
                                 <th>Played At</th>
                             </tr>
                         </thead>
@@ -306,8 +307,8 @@
                 createGenresChart(stats.genres);
                 createActivityChart(stats.daily_activity);
 
-                // Populate table
-                populateTable(dataResult.data);
+                // Populate table with last 15 tracks
+                populateTable(dataResult.recent_plays || dataResult.data.slice(0, 15));
 
                 // Show dashboard
                 document.getElementById('loading').style.display = 'none';
@@ -321,8 +322,9 @@
 
         function createTracksChart(data) {
             const ctx = document.getElementById('tracksChart').getContext('2d');
-            const labels = data.map(item => `${item.Track} - ${item.Artist}`).slice(0, 10);
+            const labels = data.map(item => item.Track).slice(0, 10);
             const counts = data.map(item => item['Play Count']).slice(0, 10);
+            const artists = data.map(item => item.Artist).slice(0, 10);
 
             if (tracksChart) tracksChart.destroy();
 
@@ -344,6 +346,14 @@
                     plugins: {
                         legend: {
                             display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    const index = context.dataIndex;
+                                    return `Artist: ${artists[index]}`;
+                                }
+                            }
                         }
                     },
                     scales: {
@@ -359,9 +369,11 @@
                         },
                         x: {
                             ticks: {
-                                maxRotation: 45,
-                                minRotation: 45,
-                                color: '#b3b3b3'
+                                maxRotation: 20,
+                                minRotation: 20,
+                                color: '#b3b3b3',
+                                autoSkip: true,
+                                maxTicksLimit: 10
                             },
                             grid: {
                                 color: 'rgba(255, 255, 255, 0.1)'
@@ -503,10 +515,13 @@
             const tbody = document.getElementById('tracksTableBody');
             tbody.innerHTML = '';
 
-            // Sort by most recent first
+            // Sort by most recent first (data should already be sorted, but ensure it)
             const sortedData = [...data].sort((a, b) => new Date(b['Played At']) - new Date(a['Played At']));
 
-            sortedData.forEach(track => {
+            // Limit to 15 tracks
+            const limitedData = sortedData.slice(0, 15);
+
+            limitedData.forEach(track => {
                 const row = document.createElement('tr');
                 const playedAt = new Date(track['Played At']).toLocaleString('en-US', {
                     year: 'numeric',
@@ -515,12 +530,14 @@
                     hour: '2-digit',
                     minute: '2-digit'
                 });
+                
                 row.innerHTML = `
-                    <td><strong>${track.Track}</strong></td>
-                    <td>${track.Artist}</td>
-                    <td>${track.Album}</td>
+                    <td><strong>${track.Track || 'N/A'}</strong></td>
+                    <td>${track.Artist || 'N/A'}</td>
+                    <td>${track.Album || 'N/A'}</td>
+                    <td>${track['Release Date'] || 'N/A'}</td>
+                    <td>${track.Popularity || 0}</td>
                     <td>${track.Genres || 'N/A'}</td>
-                    <td>${track.Popularity}</td>
                     <td>${playedAt}</td>
                 `;
                 tbody.appendChild(row);
