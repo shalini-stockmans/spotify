@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -117,15 +117,46 @@ def init_database():
     conn.commit()
     conn.close()
 
-def fetch_artist_genres(artist_id):
-    """Fetch genres for an artist"""
+def fetch_artist_genres(artist_id, artist_name=""):
+    """Fetch genres for an artist, using local cache to avoid redundant API calls"""
+    if sp is None:
+        return []
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Ensure cache table exists
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS genre_cache (
+            artist_id TEXT PRIMARY KEY,
+            artist_name TEXT,
+            genres TEXT,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Check cache first
+    cursor.execute("SELECT genres FROM genre_cache WHERE artist_id = ?", (artist_id,))
+    row = cursor.fetchone()
+    if row is not None:
+        conn.close()
+        return row[0].split(", ") if row[0] else []
+    
+    # Not cached — call Spotify API
     try:
-        if sp is None:
-            return []
         artist = sp.artist(artist_id)
-        return artist.get('genres', [])
+        genres = artist.get('genres', [])
+        genre_str = ", ".join(genres) if genres else ""
+        cursor.execute(
+            "INSERT OR REPLACE INTO genre_cache (artist_id, artist_name, genres) VALUES (?, ?, ?)",
+            (artist_id, artist_name or artist.get('name', ''), genre_str)
+        )
+        conn.commit()
+        conn.close()
+        return genres
     except Exception as e:
         print(f"Error fetching genres for artist {artist_id}: {e}")
+        conn.close()
         return []
 
 def fetch_recently_played_paginated(limit=50, max_batches=20):
@@ -155,10 +186,10 @@ def fetch_recently_played_paginated(limit=50, max_batches=20):
                 release_date = track['album']['release_date']
                 track_popularity = track['popularity']
                 
-                # Fetch genres for the first artist
+                # Fetch genres for the first artist (cached per artist)
                 track_genres = []
                 if track['artists']:
-                    track_genres = fetch_artist_genres(track['artists'][0]['id'])
+                    track_genres = fetch_artist_genres(track['artists'][0]['id'], track['artists'][0]['name'])
 
                 all_tracks.append({
                     "Track": track_name,
@@ -361,66 +392,62 @@ def dashboard():
 
 @app.route('/api/data')
 def get_data():
-    """API endpoint to get last 7 days of listening data from database"""
-    # No need to check sp - we're reading from database only
-    df_last_7 = get_last_7_days_data()
+    """API endpoint to get listening data from database. Accepts ?days=7 or ?days=30"""
+    days = request.args.get('days', 7, type=int)
+    days = max(1, min(days, 365))
+
+    df = get_tracks_from_db(days=days)
     
-    if df_last_7.empty:
+    if df.empty:
         return jsonify({
-            'error': 'No data available for the last 7 days.'
+            'error': f'No data available for the last {days} days.'
         }), 404
     
-    # Replace NaN with empty string for string columns, None for others
-    df_last_7 = df_last_7.copy()
-    for col in df_last_7.columns:
-        if df_last_7[col].dtype == 'object':
-            df_last_7[col] = df_last_7[col].fillna('')
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].fillna('')
         else:
-            df_last_7[col] = df_last_7[col].fillna(0)
+            df[col] = df[col].fillna(0)
     
-    # Convert to JSON-friendly format
-    data = df_last_7.to_dict('records')
-    
-    # Clean all values for JSON serialization
+    data = df.to_dict('records')
     cleaned_data = [clean_for_json(record) for record in data]
     
-    # Limit to last 15 tracks for recent plays table
-    recent_15 = cleaned_data[:15] if len(cleaned_data) > 15 else cleaned_data
+    recent_count = 15 if days <= 7 else 25
+    recent = cleaned_data[:recent_count] if len(cleaned_data) > recent_count else cleaned_data
     
     return jsonify({
-        'data': cleaned_data,  # All data for stats
-        'recent_plays': recent_15,  # Last 15 for table
-        'total_tracks': len(df_last_7),
+        'data': cleaned_data,
+        'recent_plays': recent,
+        'total_tracks': len(df),
         'date_range': {
-            'start': (datetime.now() - timedelta(days=7)).isoformat(),
+            'start': (datetime.now() - timedelta(days=days)).isoformat(),
             'end': datetime.now().isoformat()
         }
     })
 
 @app.route('/api/stats')
 def get_stats():
-    """API endpoint to get aggregated statistics from database"""
-    # No need to check sp - we're reading from database only
-    df_last_7 = get_last_7_days_data()
+    """API endpoint to get aggregated statistics. Accepts ?days=7 or ?days=30"""
+    days = request.args.get('days', 7, type=int)
+    days = max(1, min(days, 365))
+
+    df = get_tracks_from_db(days=days)
     
-    if df_last_7.empty:
-        return jsonify({'error': 'No data available for the last 7 days.'}), 404
+    if df.empty:
+        return jsonify({'error': f'No data available for the last {days} days.'}), 404
     
-    # Most played tracks
-    top_tracks = df_last_7.groupby(['Track', 'Artist']).size().reset_index(name='Play Count')
+    top_tracks = df.groupby(['Track', 'Artist']).size().reset_index(name='Play Count')
     top_tracks = top_tracks.sort_values('Play Count', ascending=False).head(10)
     
-    # Most played artists
-    # Split artists and count individual artist plays
     all_artists = []
-    for artists in df_last_7['Artist'].str.split(', '):
+    for artists in df['Artist'].str.split(', '):
         all_artists.extend(artists)
     top_artists = pd.Series(all_artists).value_counts().head(10).reset_index()
     top_artists.columns = ['Artist', 'Play Count']
     
-    # Genre distribution - handle NaN values
     all_genres = []
-    for genres in df_last_7['Genres'].astype(str).str.split(', '):
+    for genres in df['Genres'].astype(str).str.split(', '):
         if isinstance(genres, list):
             all_genres.extend([g.strip() for g in genres if g.strip() and g.strip() != 'nan'])
     if all_genres:
@@ -429,25 +456,39 @@ def get_stats():
     else:
         genre_counts = pd.DataFrame(columns=['Genre', 'Count'])
     
-    # Listening activity by day
-    df_last_7['Date'] = df_last_7['Played At'].dt.date
-    daily_counts = df_last_7.groupby('Date').size().reset_index(name='Count')
+    df['Date'] = df['Played At'].dt.date
+    daily_counts = df.groupby('Date').size().reset_index(name='Count')
     daily_counts['Date'] = daily_counts['Date'].astype(str)
     
-    # Popularity statistics - handle NaN
-    avg_popularity = df_last_7['Popularity'].mean()
+    # Hourly breakdown (useful for monthly view)
+    df['Hour'] = df['Played At'].dt.hour
+    hourly_counts = df.groupby('Hour').size().reset_index(name='Count')
+    hourly_counts.columns = ['Hour', 'Count']
+    
+    # Weekly breakdown (useful for monthly view)
+    df['Week'] = df['Played At'].dt.isocalendar().week.astype(int)
+    df['WeekStart'] = df['Played At'].dt.to_period('W').apply(lambda r: r.start_time).dt.strftime('%b %d')
+    weekly_counts = df.groupby('WeekStart').size().reset_index(name='Count')
+    weekly_counts.columns = ['Week', 'Count']
+    
+    avg_popularity = df['Popularity'].mean()
     if pd.isna(avg_popularity):
         avg_popularity = 0
     
-    # Convert DataFrames to dict, handling any NaN values
+    # Total and average listening time
+    if 'Duration (ms)' in df.columns:
+        dur = pd.to_numeric(df['Duration (ms)'], errors='coerce').fillna(0)
+        total_duration_ms = int(dur.sum())
+        avg_duration_ms = int(dur[dur > 0].mean()) if (dur > 0).any() else 0
+    else:
+        total_duration_ms = 0
+        avg_duration_ms = 0
+    
     def clean_dict_for_json(data):
-        """Convert DataFrame records and clean all values for JSON"""
         if data.empty:
             return []
-        # Fill NaN values before converting
         data = data.fillna('').copy()
         records = data.to_dict('records')
-        # Clean each record recursively
         return [clean_for_json(record) for record in records]
     
     return jsonify({
@@ -455,13 +496,18 @@ def get_stats():
         'top_artists': clean_dict_for_json(top_artists),
         'genres': clean_dict_for_json(genre_counts),
         'daily_activity': clean_dict_for_json(daily_counts),
+        'hourly_activity': clean_dict_for_json(hourly_counts),
+        'weekly_activity': clean_dict_for_json(weekly_counts),
         'avg_popularity': round(float(avg_popularity), 2) if not pd.isna(avg_popularity) else 0.0,
-        'unique_tracks': int(df_last_7['Track'].nunique()),
-        'unique_artists': int(df_last_7['Artist'].nunique())
+        'unique_tracks': int(df['Track'].nunique()),
+        'unique_artists': int(df['Artist'].nunique()),
+        'total_plays': len(df),
+        'total_duration_ms': total_duration_ms,
+        'avg_duration_ms': avg_duration_ms
     })
 
 # Initialize database on startup
 init_database()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=4000)

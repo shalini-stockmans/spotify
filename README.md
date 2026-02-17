@@ -63,7 +63,7 @@ Start the Flask web server:
 python app.py
 ```
 
-The dashboard will be available at: `http://localhost:5000`
+The dashboard will be available at: `http://localhost:4000`
 
 ## Project Structure
 
@@ -85,7 +85,7 @@ spotify/
 
 ## Usage
 
-1. **View Dashboard**: Start the Flask app with `python app.py` and open `http://localhost:5000` in your browser
+1. **View Dashboard**: Start the Flask app with `python app.py` and open `http://localhost:4000` in your browser
    - The dashboard automatically syncs new tracks from Spotify when you visit it
 2. **Manual Sync** (Optional): Run `python sync_spotify.py` to manually sync tracks
 3. **Automated Sync**: Set up automated syncing using GitHub Actions or Windows Task Scheduler (see `SETUP_AUTOMATION.md`)

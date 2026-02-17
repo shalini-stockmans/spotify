@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Listening Dashboard - Last 7 Days</title>
+    <title>Spotify Listening Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
@@ -29,10 +29,12 @@
             background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
             padding: 30px;
             border-radius: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 0;
             box-shadow: 0 8px 32px rgba(29, 185, 84, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.05);
             text-align: center;
             border: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
         }
 
         h1 {
@@ -47,9 +49,78 @@
             font-size: 1.1em;
         }
 
+        /* ─── Tabs ─── */
+        .tab-bar {
+            display: flex;
+            background: linear-gradient(135deg, #141414 0%, #1e1e1e 100%);
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 16px 24px;
+            background: transparent;
+            color: #b3b3b3;
+            border: none;
+            font-size: 1.05em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            letter-spacing: 0.5px;
+        }
+
+        .tab-btn::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 20%;
+            width: 60%;
+            height: 3px;
+            background: transparent;
+            border-radius: 3px 3px 0 0;
+            transition: all 0.3s ease;
+        }
+
+        .tab-btn:hover {
+            color: #ffffff;
+            background: rgba(29, 185, 84, 0.06);
+        }
+
+        .tab-btn.active {
+            color: #1db954;
+            background: rgba(29, 185, 84, 0.08);
+        }
+
+        .tab-btn.active::after {
+            background: #1db954;
+            box-shadow: 0 0 12px rgba(29, 185, 84, 0.6);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.35s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ─── Cards & Charts ─── */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -105,6 +176,10 @@
             box-shadow: 0 12px 40px rgba(29, 185, 84, 0.15), 0 0 0 1px rgba(29, 185, 84, 0.15);
         }
 
+        .chart-container.full-width {
+            grid-column: 1 / -1;
+        }
+
         .chart-title {
             font-size: 1.5em;
             color: #ffffff;
@@ -116,6 +191,10 @@
         .chart-wrapper {
             position: relative;
             height: 300px;
+        }
+
+        .chart-wrapper.tall {
+            height: 380px;
         }
 
         .table-container {
@@ -184,7 +263,6 @@
             .charts-grid {
                 grid-template-columns: 1fr;
             }
-            
             h1 {
                 font-size: 2em;
             }
@@ -195,79 +273,145 @@
     <div class="container">
         <header>
             <h1>Spotify Listening Dashboard</h1>
-            <p class="subtitle">Your Last 7 Days of Music</p>
+            <p class="subtitle" id="headerSubtitle">Your Last 7 Days of Music</p>
         </header>
+
+        <!-- Tab bar -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="week" onclick="switchTab('week')">This Week</button>
+            <button class="tab-btn" data-tab="month" onclick="switchTab('month')">This Month</button>
+        </div>
 
         <div id="loading" class="loading">Loading your listening data...</div>
         <div id="error" class="error" style="display: none;"></div>
 
-        <div id="dashboard" style="display: none;">
+        <!-- ═══════════════════ WEEK TAB ═══════════════════ -->
+        <div id="tab-week" class="tab-content active" style="display:none;">
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-value" id="total-tracks">0</div>
+                    <div class="stat-value" id="w-total-tracks">0</div>
                     <div class="stat-label">Total Plays</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="unique-tracks">0</div>
+                    <div class="stat-value" id="w-unique-tracks">0</div>
                     <div class="stat-label">Unique Tracks</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="unique-artists">0</div>
+                    <div class="stat-value" id="w-unique-artists">0</div>
                     <div class="stat-label">Unique Artists</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value" id="avg-popularity">0</div>
+                    <div class="stat-value" id="w-avg-popularity">0</div>
                     <div class="stat-label">Avg Popularity</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="w-listen-time">0h 0m</div>
+                    <div class="stat-label">Total Listening</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="w-avg-duration">0:00</div>
+                    <div class="stat-label">Avg Song Length</div>
                 </div>
             </div>
 
             <div class="charts-grid">
                 <div class="chart-container">
                     <div class="chart-title">Top Tracks</div>
-                    <div class="chart-wrapper">
-                        <canvas id="tracksChart"></canvas>
-                    </div>
+                    <div class="chart-wrapper"><canvas id="wTracksChart"></canvas></div>
                 </div>
-
                 <div class="chart-container">
                     <div class="chart-title">Top Artists</div>
-                    <div class="chart-wrapper">
-                        <canvas id="artistsChart"></canvas>
-                    </div>
+                    <div class="chart-wrapper"><canvas id="wArtistsChart"></canvas></div>
                 </div>
-
                 <div class="chart-container">
                     <div class="chart-title">Genre Distribution</div>
-                    <div class="chart-wrapper">
-                        <canvas id="genresChart"></canvas>
-                    </div>
+                    <div class="chart-wrapper"><canvas id="wGenresChart"></canvas></div>
                 </div>
-
                 <div class="chart-container">
                     <div class="chart-title">Listening Activity</div>
-                    <div class="chart-wrapper">
-                        <canvas id="activityChart"></canvas>
-                    </div>
+                    <div class="chart-wrapper"><canvas id="wActivityChart"></canvas></div>
                 </div>
             </div>
 
             <div class="table-container">
                 <div class="table-title">Recent Plays (Last 15 Tracks)</div>
                 <div style="overflow-x: auto;">
-                    <table id="tracksTable">
+                    <table>
                         <thead>
                             <tr>
-                                <th>Track</th>
-                                <th>Artist</th>
-                                <th>Album</th>
-                                <th>Release Date</th>
-                                <th>Popularity</th>
-                                <th>Genres</th>
-                                <th>Played At</th>
+                                <th>Track</th><th>Artist</th><th>Album</th>
+                                <th>Duration</th><th>Release Date</th><th>Popularity</th><th>Genres</th><th>Played At</th>
                             </tr>
                         </thead>
-                        <tbody id="tracksTableBody">
-                        </tbody>
+                        <tbody id="wTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════ MONTH TAB ═══════════════════ -->
+        <div id="tab-month" class="tab-content" style="display:none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="m-total-tracks">0</div>
+                    <div class="stat-label">Total Plays</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="m-unique-tracks">0</div>
+                    <div class="stat-label">Unique Tracks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="m-unique-artists">0</div>
+                    <div class="stat-label">Unique Artists</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="m-avg-popularity">0</div>
+                    <div class="stat-label">Avg Popularity</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="m-listen-time">0h 0m</div>
+                    <div class="stat-label">Total Listening</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="m-avg-duration">0:00</div>
+                    <div class="stat-label">Avg Song Length</div>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <div class="chart-title">Top Tracks</div>
+                    <div class="chart-wrapper tall"><canvas id="mTracksChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Top Artists</div>
+                    <div class="chart-wrapper tall"><canvas id="mArtistsChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Genre Breakdown</div>
+                    <div class="chart-wrapper"><canvas id="mGenresChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Listening by Hour of Day</div>
+                    <div class="chart-wrapper"><canvas id="mHourlyChart"></canvas></div>
+                </div>
+                <div class="chart-container full-width">
+                    <div class="chart-title">Daily Listening Activity (30 Days)</div>
+                    <div class="chart-wrapper"><canvas id="mActivityChart"></canvas></div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <div class="table-title">Recent Plays (Last 25 Tracks)</div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Track</th><th>Artist</th><th>Album</th>
+                                <th>Duration</th><th>Release Date</th><th>Popularity</th><th>Genres</th><th>Played At</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mTableBody"></tbody>
                     </table>
                 </div>
             </div>
@@ -275,277 +419,330 @@
     </div>
 
     <script>
-        let tracksChart, artistsChart, genresChart, activityChart;
+        /* ── Shared palette ── */
+        const PALETTE = [
+            '#1db954','#1ed760','#ff6b6b','#4ecdc4','#45b7d1',
+            '#96ceb4','#ffeaa7','#dda15e','#bc6c25','#ffa07a'
+        ];
+        const GRADIENT_GREEN = (ctx, area) => {
+            const g = ctx.createLinearGradient(0, area.bottom, 0, area.top);
+            g.addColorStop(0, 'rgba(29,185,84,0.05)');
+            g.addColorStop(1, 'rgba(29,185,84,0.35)');
+            return g;
+        };
 
-        async function loadDashboard() {
+        /* ── Chart instances (keyed so we can destroy on re-render) ── */
+        const charts = {};
+
+        /* ── Cache loaded data so tab-switching is instant ── */
+        const cache = { week: null, month: null };
+
+        /* ─────────────── Tab switching ─────────────── */
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            const target = document.getElementById('tab-' + tab);
+            target.classList.add('active');
+            target.style.display = 'block';
+
+            // Hide the other tab
+            const other = tab === 'week' ? 'month' : 'week';
+            document.getElementById('tab-' + other).style.display = 'none';
+
+            document.getElementById('headerSubtitle').textContent =
+                tab === 'week' ? 'Your Last 7 Days of Music' : 'Your Last 30 Days of Music';
+
+            // Load data if not yet cached
+            if (!cache[tab]) {
+                loadTab(tab);
+            }
+        }
+
+        /* ─────────────── Data loading ─────────────── */
+        async function loadTab(tab) {
+            const days = tab === 'week' ? 7 : 30;
             try {
-                // Load stats
-                const statsResponse = await fetch('/api/stats');
-                if (!statsResponse.ok) {
-                    const errorData = await statsResponse.json();
-                    throw new Error(errorData.error || 'Failed to load statistics');
-                }
-                const stats = await statsResponse.json();
+                const [statsRes, dataRes] = await Promise.all([
+                    fetch(`/api/stats?days=${days}`),
+                    fetch(`/api/data?days=${days}`)
+                ]);
+                if (!statsRes.ok) throw new Error((await statsRes.json()).error || 'Stats load failed');
+                if (!dataRes.ok)  throw new Error((await dataRes.json()).error || 'Data load failed');
 
-                // Load data
-                const dataResponse = await fetch('/api/data');
-                if (!dataResponse.ok) {
-                    const errorData = await dataResponse.json();
-                    throw new Error(errorData.error || 'Failed to load data');
-                }
-                const dataResult = await dataResponse.json();
+                const stats = await statsRes.json();
+                const data  = await dataRes.json();
+                cache[tab] = { stats, data };
+                renderTab(tab, stats, data);
 
-                // Update stats
-                document.getElementById('total-tracks').textContent = dataResult.total_tracks || 0;
-                document.getElementById('unique-tracks').textContent = stats.unique_tracks || 0;
-                document.getElementById('unique-artists').textContent = stats.unique_artists || 0;
-                document.getElementById('avg-popularity').textContent = stats.avg_popularity || 0;
-
-                // Create charts
-                createTracksChart(stats.top_tracks);
-                createArtistsChart(stats.top_artists);
-                createGenresChart(stats.genres);
-                createActivityChart(stats.daily_activity);
-
-                // Populate table with last 15 tracks
-                populateTable(dataResult.recent_plays || dataResult.data.slice(0, 15));
-
-                // Show dashboard
                 document.getElementById('loading').style.display = 'none';
-                document.getElementById('dashboard').style.display = 'block';
-            } catch (error) {
+                document.getElementById('tab-' + tab).style.display = 'block';
+            } catch (err) {
                 document.getElementById('loading').style.display = 'none';
-                document.getElementById('error').textContent = error.message;
+                document.getElementById('error').textContent = err.message;
                 document.getElementById('error').style.display = 'block';
             }
         }
 
-        function createTracksChart(data) {
-            const ctx = document.getElementById('tracksChart').getContext('2d');
-            const labels = data.map(item => item.Track).slice(0, 10);
-            const counts = data.map(item => item['Play Count']).slice(0, 10);
-            const artists = data.map(item => item.Artist).slice(0, 10);
+        /* ─────────────── Render logic ─────────────── */
+        function renderTab(tab, stats, data) {
+            const p = tab === 'week' ? 'w' : 'm';
 
-            if (tracksChart) tracksChart.destroy();
+            // Stats cards
+            document.getElementById(`${p}-total-tracks`).textContent  = data.total_tracks || 0;
+            document.getElementById(`${p}-unique-tracks`).textContent = stats.unique_tracks || 0;
+            document.getElementById(`${p}-unique-artists`).textContent = stats.unique_artists || 0;
+            document.getElementById(`${p}-avg-popularity`).textContent = stats.avg_popularity || 0;
+            document.getElementById(`${p}-listen-time`).textContent = fmtTotalTime(stats.total_duration_ms);
+            document.getElementById(`${p}-avg-duration`).textContent = fmtDuration(stats.avg_duration_ms);
 
-            tracksChart = new Chart(ctx, {
+            if (tab === 'week') {
+                renderWeekCharts(stats);
+                populateTable('wTableBody', data.recent_plays || data.data.slice(0, 15));
+            } else {
+                renderMonthCharts(stats);
+                populateTable('mTableBody', data.recent_plays || data.data.slice(0, 25));
+            }
+        }
+
+        /* ═══════════════════ WEEK CHARTS ═══════════════════ */
+        function renderWeekCharts(stats) {
+            makeBarChart('wTracksChart', stats.top_tracks.map(t=>t.Track), stats.top_tracks.map(t=>t['Play Count']),
+                stats.top_tracks.map(t=>t.Artist), false);
+            makeDoughnutChart('wArtistsChart', stats.top_artists.map(a=>a.Artist), stats.top_artists.map(a=>a['Play Count']));
+            makePieChart('wGenresChart', stats.genres.map(g=>g.Genre), stats.genres.map(g=>g.Count));
+            makeLineChart('wActivityChart', stats.daily_activity.map(d => fmtDate(d.Date)), stats.daily_activity.map(d=>d.Count));
+        }
+
+        /* ═══════════════════ MONTH CHARTS ═══════════════════ */
+        function renderMonthCharts(stats) {
+            // Horizontal bar for top tracks
+            makeBarChart('mTracksChart', stats.top_tracks.map(t=>t.Track), stats.top_tracks.map(t=>t['Play Count']),
+                stats.top_tracks.map(t=>t.Artist), true);
+            // Polar area for top artists
+            makePolarChart('mArtistsChart', stats.top_artists.map(a=>a.Artist), stats.top_artists.map(a=>a['Play Count']));
+            // Radar for genres
+            makeRadarChart('mGenresChart', stats.genres.map(g=>g.Genre), stats.genres.map(g=>g.Count));
+            // Hourly bar chart
+            makeHourlyChart('mHourlyChart', stats.hourly_activity || []);
+            // 30-day line
+            makeLineChart('mActivityChart',
+                stats.daily_activity.map(d => fmtDateShort(d.Date)),
+                stats.daily_activity.map(d => d.Count));
+        }
+
+        /* ─────────────── Chart builders ─────────────── */
+        function destroy(id) { if (charts[id]) { charts[id].destroy(); } }
+
+        function makeBarChart(id, labels, data, artists, horizontal) {
+            destroy(id);
+            const ctx = document.getElementById(id).getContext('2d');
+            charts[id] = new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Play Count',
-                        data: counts,
-                        backgroundColor: '#1db954',
-                        borderColor: '#1ed760',
-                        borderWidth: 2
-                    }]
-                },
+                data: { labels, datasets: [{ label: 'Play Count', data, backgroundColor: '#1db954', borderColor: '#1ed760', borderWidth: 2 }] },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    indexAxis: horizontal ? 'y' : 'x',
+                    responsive: true, maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            callbacks: {
-                                afterLabel: function(context) {
-                                    const index = context.dataIndex;
-                                    return `Artist: ${artists[index]}`;
-                                }
-                            }
-                        }
+                        legend: { display: false },
+                        tooltip: { callbacks: { afterLabel: ctx2 => artists ? `Artist: ${artists[ctx2.dataIndex]}` : '' } }
                     },
                     scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1,
-                                color: '#b3b3b3'
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            }
-                        },
-                        x: {
-                            ticks: {
-                                maxRotation: 20,
-                                minRotation: 20,
-                                color: '#b3b3b3',
-                                autoSkip: true,
-                                maxTicksLimit: 10
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            }
-                        }
+                        y: { beginAtZero: true, ticks: { color: '#b3b3b3' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        x: { ticks: { maxRotation: 20, minRotation: 20, color: '#b3b3b3', autoSkip: true, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.1)' } }
                     }
                 }
             });
         }
 
-        function createArtistsChart(data) {
-            const ctx = document.getElementById('artistsChart').getContext('2d');
-            const labels = data.map(item => item.Artist).slice(0, 10);
-            const counts = data.map(item => item['Play Count']).slice(0, 10);
-
-            if (artistsChart) artistsChart.destroy();
-
-            artistsChart = new Chart(ctx, {
+        function makeDoughnutChart(id, labels, data) {
+            destroy(id);
+            charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
                 type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: counts,
-                        backgroundColor: [
-                            '#1db954', '#1ed760', '#ff6b6b', '#4ecdc4',
-                            '#45b7d1', '#96ceb4', '#ffeaa7', '#dda15e',
-                            '#bc6c25', '#ffa07a'
-                        ]
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                color: '#b3b3b3'
-                            }
-                        }
-                    }
-                }
+                data: { labels, datasets: [{ data, backgroundColor: PALETTE }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#b3b3b3' } } } }
             });
         }
 
-        function createGenresChart(data) {
-            const ctx = document.getElementById('genresChart').getContext('2d');
-            const labels = data.map(item => item.Genre).slice(0, 10);
-            const counts = data.map(item => item.Count).slice(0, 10);
-
-            if (genresChart) genresChart.destroy();
-
-            genresChart = new Chart(ctx, {
+        function makePieChart(id, labels, data) {
+            destroy(id);
+            charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
                 type: 'pie',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: counts,
-                        backgroundColor: [
-                            '#1db954', '#ff6b6b', '#4ecdc4', '#45b7d1',
-                            '#96ceb4', '#ffeaa7', '#dda15e', '#bc6c25',
-                            '#ffa07a', '#98d8c8'
-                        ]
-                    }]
-                },
+                data: { labels, datasets: [{ data, backgroundColor: PALETTE }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#b3b3b3' } } } }
+            });
+        }
+
+        function makePolarChart(id, labels, data) {
+            destroy(id);
+            charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
+                type: 'polarArea',
+                data: { labels, datasets: [{ data, backgroundColor: PALETTE.map(c => c + 'cc') }] },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                color: '#b3b3b3'
-                            }
-                        }
-                    }
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { r: { ticks: { color: '#b3b3b3', backdropColor: 'transparent' }, grid: { color: 'rgba(255,255,255,0.1)' } } },
+                    plugins: { legend: { position: 'right', labels: { color: '#b3b3b3' } } }
                 }
             });
         }
 
-        function createActivityChart(data) {
-            const ctx = document.getElementById('activityChart').getContext('2d');
-            const labels = data.map(item => new Date(item.Date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }));
-            const counts = data.map(item => item.Count);
-
-            if (activityChart) activityChart.destroy();
-
-            activityChart = new Chart(ctx, {
-                type: 'line',
+        function makeRadarChart(id, labels, data) {
+            destroy(id);
+            charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
+                type: 'radar',
                 data: {
-                    labels: labels,
+                    labels,
+                    datasets: [{
+                        label: 'Plays',
+                        data,
+                        backgroundColor: 'rgba(29,185,84,0.25)',
+                        borderColor: '#1db954',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#1db954',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 1,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { r: { angleLines: { color: 'rgba(255,255,255,0.1)' }, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#b3b3b3', backdropColor: 'transparent' }, pointLabels: { color: '#b3b3b3', font: { size: 11 } } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function makeHourlyChart(id, hourlyData) {
+            destroy(id);
+            const hours = Array.from({ length: 24 }, (_, i) => i);
+            const counts = hours.map(h => {
+                const match = hourlyData.find(d => d.Hour === h);
+                return match ? match.Count : 0;
+            });
+            const labels = hours.map(h => {
+                const suffix = h >= 12 ? 'PM' : 'AM';
+                const hr = h % 12 || 12;
+                return `${hr}${suffix}`;
+            });
+
+            const ctx = document.getElementById(id).getContext('2d');
+            charts[id] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
                     datasets: [{
                         label: 'Plays',
                         data: counts,
+                        backgroundColor: counts.map(c => {
+                            const max = Math.max(...counts, 1);
+                            const intensity = 0.3 + (c / max) * 0.7;
+                            return `rgba(29,185,84,${intensity})`;
+                        }),
                         borderColor: '#1db954',
-                        backgroundColor: 'rgba(29, 185, 84, 0.2)',
-                        borderWidth: 3,
-                        fill: true,
-                        tension: 0.4,
-                        pointBackgroundColor: '#1db954',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2,
-                        pointRadius: 5
+                        borderWidth: 1,
+                        borderRadius: 4
                     }]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    },
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
                     scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1,
-                                color: '#b3b3b3'
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            }
-                        },
-                        x: {
-                            ticks: {
-                                color: '#b3b3b3'
-                            },
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            }
-                        }
+                        y: { beginAtZero: true, ticks: { color: '#b3b3b3', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        x: { ticks: { color: '#b3b3b3', maxRotation: 45, minRotation: 45 }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     }
                 }
             });
         }
 
-        function populateTable(data) {
-            const tbody = document.getElementById('tracksTableBody');
+        function makeLineChart(id, labels, data) {
+            destroy(id);
+            const ctx = document.getElementById(id).getContext('2d');
+            charts[id] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Plays', data,
+                        borderColor: '#1db954',
+                        backgroundColor: function(context) {
+                            const chart = context.chart;
+                            const { ctx: c, chartArea } = chart;
+                            if (!chartArea) return 'rgba(29,185,84,0.2)';
+                            return GRADIENT_GREEN(c, chartArea);
+                        },
+                        borderWidth: 3, fill: true, tension: 0.4,
+                        pointBackgroundColor: '#1db954', pointBorderColor: '#fff', pointBorderWidth: 2, pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1, color: '#b3b3b3' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        x: { ticks: { color: '#b3b3b3', maxRotation: 45, minRotation: 45, autoSkip: true, maxTicksLimit: 15 }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                    }
+                }
+            });
+        }
+
+        /* ─────────────── Table builder ─────────────── */
+        function populateTable(tbodyId, data) {
+            const tbody = document.getElementById(tbodyId);
             tbody.innerHTML = '';
-
-            // Sort by most recent first (data should already be sorted, but ensure it)
-            const sortedData = [...data].sort((a, b) => new Date(b['Played At']) - new Date(a['Played At']));
-
-            // Limit to 15 tracks
-            const limitedData = sortedData.slice(0, 15);
-
-            limitedData.forEach(track => {
-                const row = document.createElement('tr');
+            const sorted = [...data].sort((a, b) => new Date(b['Played At']) - new Date(a['Played At']));
+            sorted.forEach(track => {
                 const playedAt = new Date(track['Played At']).toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
+                    timeZone: TZ,
+                    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
                 });
-                
+                const durMs = track['Duration (ms)'];
+                const duration = (durMs != null && durMs > 0) ? fmtDuration(durMs) : 'N/A';
+                const row = document.createElement('tr');
                 row.innerHTML = `
                     <td><strong>${track.Track || 'N/A'}</strong></td>
                     <td>${track.Artist || 'N/A'}</td>
                     <td>${track.Album || 'N/A'}</td>
+                    <td>${duration}</td>
                     <td>${track['Release Date'] || 'N/A'}</td>
                     <td>${track.Popularity || 0}</td>
                     <td>${track.Genres || 'N/A'}</td>
-                    <td>${playedAt}</td>
-                `;
+                    <td>${playedAt}</td>`;
                 tbody.appendChild(row);
             });
         }
 
-        // Load dashboard on page load
-        loadDashboard();
+        /* ─────────────── Helpers ─────────────── */
+        const TZ = 'America/Chicago';
+
+        function fmtDuration(ms) {
+            if (ms == null || ms <= 0) return 'N/A';
+            const totalSec = Math.round(ms / 1000);
+            const mins = Math.floor(totalSec / 60);
+            const secs = totalSec % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function fmtTotalTime(ms) {
+            if (ms == null || ms <= 0) return '0h 0m';
+            const totalMin = Math.round(ms / 60000);
+            const hours = Math.floor(totalMin / 60);
+            const mins = totalMin % 60;
+            return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+        }
+
+        function fmtDate(d) {
+            // Date strings like '2026-02-17' — parse manually to avoid UTC midnight shift
+            const [y, m, day] = d.split('-').map(Number);
+            const dt = new Date(y, m - 1, day);
+            return dt.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+        }
+        function fmtDateShort(d) {
+            const [y, m, day] = d.split('-').map(Number);
+            const dt = new Date(y, m - 1, day);
+            return dt.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+        }
+
+        /* ─────────────── Init ─────────────── */
+        loadTab('week');
     </script>
 </body>
 </html>

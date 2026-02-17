@@ -51,6 +51,16 @@ def init_database():
         )
     ''')
     
+    # Genre cache table — one row per artist, avoids redundant API calls
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS genre_cache (
+            artist_id TEXT PRIMARY KEY,
+            artist_name TEXT,
+            genres TEXT,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     # Check existing columns to determine schema version
     cursor.execute("PRAGMA table_info(listening_history)")
     existing_columns = [col[1] for col in cursor.fetchall()]
@@ -138,20 +148,43 @@ def init_database():
     conn.commit()
     conn.close()
 
-def fetch_artist_genres(sp, artist_id):
-    """Fetch genres for an artist"""
+def fetch_artist_genres(sp, artist_id, artist_name=""):
+    """Fetch genres for an artist, using local cache to avoid redundant API calls"""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Check cache first
+    cursor.execute("SELECT genres FROM genre_cache WHERE artist_id = ?", (artist_id,))
+    row = cursor.fetchone()
+    if row is not None:
+        conn.close()
+        return row[0].split(", ") if row[0] else []
+    
+    # Not cached — call Spotify API
     try:
         artist = sp.artist(artist_id)
-        return artist.get('genres', [])
+        genres = artist.get('genres', [])
+        genre_str = ", ".join(genres) if genres else ""
+        
+        # Store in cache
+        cursor.execute(
+            "INSERT OR REPLACE INTO genre_cache (artist_id, artist_name, genres) VALUES (?, ?, ?)",
+            (artist_id, artist_name or artist.get('name', ''), genre_str)
+        )
+        conn.commit()
+        conn.close()
+        return genres
     except Exception as e:
         print(f"Error fetching genres for artist {artist_id}: {e}")
+        conn.close()
         return []
 
-def fetch_recently_played_paginated(sp, limit=50, max_batches=50, skip_genres=False):
+def fetch_recently_played_paginated(sp, limit=50, max_batches=50):
     """Fetch recently played tracks from Spotify API with pagination
     Fetches ALL available tracks, not just 50. Continues until no more data.
+    Genres are always fetched (cached per artist so it's fast).
     """
-    print(f"Fetching recently played tracks (limit={limit}, max_batches={max_batches}, skip_genres={skip_genres})...")
+    print(f"Fetching recently played tracks (limit={limit}, max_batches={max_batches})...")
     all_tracks = []
     before_timestamp = None
     total_fetched = 0
@@ -180,11 +213,11 @@ def fetch_recently_played_paginated(sp, limit=50, max_batches=50, skip_genres=Fa
                 duration_ms = track.get('duration_ms', 0)
                 track_popularity = track.get('popularity', 0)
                 
-                # Fetch genres for the first artist (skip if requested to speed up)
+                # Fetch genres for the first artist (cached per artist)
                 track_genres = []
-                if not skip_genres and track['artists']:
+                if track['artists']:
                     try:
-                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'])
+                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'], track['artists'][0]['name'])
                     except Exception as e:
                         print(f"Warning: Could not fetch genres for {track_name}: {e}")
 
@@ -287,9 +320,10 @@ def parse_timestamp_to_utc_millis(timestamp_str):
         print(f"Warning: Could not parse timestamp {timestamp_str}: {e}")
         return None
 
-def fetch_new_tracks_only(sp, skip_genres=False):
+def fetch_new_tracks_only(sp):
     """Fetch only NEW tracks that aren't in the database yet.
     Stops when we encounter songs we already have.
+    Genres are always fetched (cached per artist so it's fast).
     """
     print("=" * 60)
     print("Checking database for latest song...")
@@ -356,11 +390,11 @@ def fetch_new_tracks_only(sp, skip_genres=False):
                 # Convert played_at from UTC to Central time
                 played_at_central = convert_to_central(played_at)
                 
-                # Fetch genres (skip in CI to speed up)
+                # Fetch genres (cached per artist — fast even in CI)
                 track_genres = []
-                if not skip_genres and track['artists']:
+                if track['artists']:
                     try:
-                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'])
+                        track_genres = fetch_artist_genres(sp, track['artists'][0]['id'], track['artists'][0]['name'])
                     except Exception as e:
                         pass  # Skip genre fetch on error
                 
@@ -510,7 +544,8 @@ def sync_spotify_data():
     init_database()
     
     # Fetch ONLY new tracks (stops when it hits existing songs)
-    new_tracks = fetch_new_tracks_only(sp, skip_genres=is_ci)
+    # Genres are always fetched now (cached per artist so it's fast)
+    new_tracks = fetch_new_tracks_only(sp)
     
     if not new_tracks:
         print("=" * 60)
@@ -614,5 +649,100 @@ def sync_spotify_data():
     print(f"  - Total tracks in database: {total_count}")
     print("=" * 60)
 
+def backfill_genres(sp):
+    """Backfill genres for existing rows that have empty genres.
+    Uses the genre_cache table to minimize API calls.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Ensure genre_cache table exists
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS genre_cache (
+            artist_id TEXT PRIMARY KEY,
+            artist_name TEXT,
+            genres TEXT,
+            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    
+    # Find rows with empty genres that have artist_ids
+    cursor.execute("""
+        SELECT id, artist_ids, artist_names 
+        FROM listening_history 
+        WHERE (genres IS NULL OR genres = '') AND artist_ids IS NOT NULL AND artist_ids != ''
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        print("No rows need genre backfill!")
+        return
+    
+    print(f"Found {len(rows)} rows with empty genres to backfill")
+    
+    # Collect unique first-artist IDs to minimize API calls
+    artist_map = {}
+    for row_id, artist_ids, artist_names in rows:
+        first_id = artist_ids.split(",")[0].strip()
+        first_name = artist_names.split(",")[0].strip() if artist_names else ""
+        if first_id:
+            if first_id not in artist_map:
+                artist_map[first_id] = {"name": first_name, "row_ids": []}
+            artist_map[first_id]["row_ids"].append(row_id)
+    
+    print(f"Need genres for {len(artist_map)} unique artists")
+    
+    updated = 0
+    for i, (artist_id, info) in enumerate(artist_map.items()):
+        genres = fetch_artist_genres(sp, artist_id, info["name"])
+        genre_str = ", ".join(genres) if genres else ""
+        
+        if genre_str:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            for row_id in info["row_ids"]:
+                cursor.execute("UPDATE listening_history SET genres = ? WHERE id = ?", (genre_str, row_id))
+                updated += 1
+            conn.commit()
+            conn.close()
+        
+        if (i + 1) % 25 == 0:
+            print(f"  Processed {i + 1}/{len(artist_map)} artists ({updated} rows updated)")
+    
+    print(f"Backfill complete: updated {updated} rows with genres")
+
+
 if __name__ == '__main__':
-    sync_spotify_data()
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == '--backfill-genres':
+        # Run genre backfill only
+        print("Running genre backfill...")
+        print("Initializing Spotify client...")
+        
+        try:
+            import glob as glob_mod
+            cache_files = glob_mod.glob('.cache') + glob_mod.glob('.cache-*')
+            cache_path = cache_files[0] if cache_files else ".cache"
+            
+            auth_manager = SpotifyOAuth(
+                client_id=client_id,
+                client_secret=client_secret,
+                redirect_uri=redirect_url,
+                scope=scope,
+                open_browser=False,
+                cache_path=cache_path
+            )
+            sp = spotipy.Spotify(auth_manager=auth_manager)
+            sp.current_user()  # Test auth
+            
+            init_database()
+            backfill_genres(sp)
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        sync_spotify_data()
