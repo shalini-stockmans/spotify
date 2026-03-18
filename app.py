@@ -506,6 +506,146 @@ def get_stats():
         'avg_duration_ms': avg_duration_ms
     })
 
+@app.route('/api/artists')
+def get_artists():
+    """Return all distinct artist names from listening history for the dropdown"""
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        df = pd.read_sql_query("SELECT DISTINCT artist_names FROM listening_history", conn)
+        col = 'artist_names'
+    except sqlite3.OperationalError:
+        df = pd.read_sql_query("SELECT DISTINCT artist FROM listening_history", conn)
+        col = 'artist'
+    conn.close()
+
+    # Split comma-separated artists and deduplicate
+    artists = set()
+    for val in df[col].dropna():
+        for a in val.split(', '):
+            a = a.strip()
+            if a:
+                artists.add(a)
+
+    return jsonify(sorted(artists, key=str.lower))
+
+
+@app.route('/api/artist')
+def get_artist():
+    """API endpoint to search listening history by artist name"""
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Please provide an artist name.'}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+
+    # Try new schema first, fall back to old
+    try:
+        query = '''
+            SELECT track_name, artist_names, album_name, release_date,
+                   duration_ms, popularity, genres, played_at
+            FROM listening_history
+            WHERE LOWER(artist_names) LIKE LOWER(?)
+            ORDER BY played_at DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=(f'%{name}%',))
+        if not df.empty:
+            df.columns = ['Track', 'Artist', 'Album', 'Release Date',
+                          'Duration (ms)', 'Popularity', 'Genres', 'Played At']
+    except sqlite3.OperationalError:
+        query = '''
+            SELECT track, artist, album, release_date,
+                   NULL as duration_ms, popularity, genres, played_at
+            FROM listening_history
+            WHERE LOWER(artist) LIKE LOWER(?)
+            ORDER BY played_at DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=(f'%{name}%',))
+        if not df.empty:
+            df.columns = ['Track', 'Artist', 'Album', 'Release Date',
+                          'Duration (ms)', 'Popularity', 'Genres', 'Played At']
+
+    conn.close()
+
+    if df.empty:
+        return jsonify({'plays': [], 'stats': None, 'query': name})
+
+    # Parse dates BEFORE fillna (which turns the column into mixed strings)
+    # Use utc=True to handle mixed timezones, then convert to Central
+    parsed_dates = pd.to_datetime(df['Played At'], errors='coerce', utc=True)
+    dates = parsed_dates.dropna()
+
+    # Listening timeline (plays per day)
+    date_only = dates.dt.tz_convert(CENTRAL_TZ).dt.date
+    timeline_df = pd.DataFrame({'Date': date_only})
+    timeline = timeline_df.groupby('Date').size().reset_index(name='Count')
+    timeline['Date'] = timeline['Date'].astype(str)
+    timeline = timeline.sort_values('Date')
+
+    # Duration stats before fillna
+    dur = pd.to_numeric(df['Duration (ms)'], errors='coerce').fillna(0)
+    total_duration_ms = int(dur.sum())
+
+    # Now clean NaN values for JSON output
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].fillna('')
+        else:
+            df[col] = df[col].fillna(0)
+
+    plays = [clean_for_json(r) for r in df.to_dict('records')]
+
+    # Stats
+    total_plays = len(df)
+    unique_tracks = int(df['Track'].nunique())
+    unique_albums = int(df['Album'].nunique())
+
+    avg_pop = df['Popularity'].mean()
+    avg_popularity = round(float(avg_pop), 2) if not pd.isna(avg_pop) else 0.0
+
+    # Top tracks by play count
+    top_tracks = (df.groupby('Track').size()
+                    .reset_index(name='Play Count')
+                    .sort_values('Play Count', ascending=False)
+                    .head(10))
+
+    # Top albums by play count
+    top_albums = (df[df['Album'] != '']
+                    .groupby('Album').size()
+                    .reset_index(name='Play Count')
+                    .sort_values('Play Count', ascending=False)
+                    .head(10))
+
+    # Genres
+    all_genres = []
+    for genres in df['Genres'].astype(str).str.split(', '):
+        if isinstance(genres, list):
+            all_genres.extend([g.strip() for g in genres if g.strip() and g.strip() != 'nan'])
+    if all_genres:
+        genre_counts = pd.Series(all_genres).value_counts().head(10).reset_index()
+        genre_counts.columns = ['Genre', 'Count']
+    else:
+        genre_counts = pd.DataFrame(columns=['Genre', 'Count'])
+
+    def to_list(frame):
+        if frame.empty:
+            return []
+        return [clean_for_json(r) for r in frame.to_dict('records')]
+
+    stats = {
+        'total_plays': total_plays,
+        'unique_tracks': unique_tracks,
+        'unique_albums': unique_albums,
+        'avg_popularity': avg_popularity,
+        'total_duration_ms': total_duration_ms,
+        'top_tracks': to_list(top_tracks),
+        'top_albums': to_list(top_albums),
+        'timeline': to_list(timeline),
+        'genres': to_list(genre_counts),
+    }
+
+    return jsonify({'plays': plays, 'stats': stats, 'query': name})
+
+
 # Initialize database on startup
 init_database()
 

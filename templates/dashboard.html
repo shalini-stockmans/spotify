@@ -296,6 +296,145 @@
             to   { opacity: 1; transform: translateY(0); }
         }
 
+        /* ── Artist Search ── */
+        .artist-search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 28px;
+        }
+
+        .artist-search-bar input {
+            flex: 1;
+            padding: 12px 18px;
+            border-radius: 999px;
+            border: 1px solid var(--sp-border);
+            background: var(--sp-surface);
+            color: var(--sp-text);
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .artist-search-bar input::placeholder { color: var(--sp-muted); }
+        .artist-search-bar input:focus { border-color: var(--sp-green); }
+
+        .artist-search-bar button {
+            padding: 12px 28px;
+            border-radius: 999px;
+            border: none;
+            background: var(--sp-green);
+            color: var(--sp-black);
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .artist-search-bar button:hover { background: var(--sp-green-light); transform: scale(1.03); }
+
+        .artist-search-wrap {
+            position: relative;
+            flex: 1;
+        }
+
+        .artist-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            max-height: 280px;
+            overflow-y: auto;
+            background: var(--sp-surface);
+            border: 1px solid var(--sp-border);
+            border-radius: var(--radius-md);
+            z-index: 200;
+        }
+
+        .artist-dropdown.open { display: block; }
+
+        .artist-dropdown-item {
+            padding: 10px 18px;
+            font-size: 0.9rem;
+            color: var(--sp-subdued);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .artist-dropdown-item:hover,
+        .artist-dropdown-item.highlighted {
+            background: var(--sp-highlight);
+            color: var(--sp-text);
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--sp-subdued);
+            font-size: 1rem;
+        }
+
+        .no-results .big { font-size: 2rem; margin-bottom: 8px; }
+
+        /* ── Coming soon ── */
+        .coming-soon {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--sp-subdued);
+        }
+
+        .coming-soon-icon {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--sp-muted);
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .coming-soon-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--sp-text);
+            margin-bottom: 8px;
+        }
+
+        .coming-soon p {
+            font-size: 0.95rem;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        /* ── Range sub-tabs ── */
+        .range-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .range-tab {
+            padding: 8px 20px;
+            border-radius: 999px;
+            border: 1px solid var(--sp-border);
+            background: transparent;
+            color: var(--sp-subdued);
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.01em;
+        }
+
+        .range-tab:hover { color: var(--sp-text); border-color: var(--sp-subdued); }
+
+        .range-tab.active {
+            background: var(--sp-green);
+            color: var(--sp-black);
+            border-color: var(--sp-green);
+        }
+
         /* ── Responsive ── */
         @media (max-width: 900px) {
             .charts-grid { grid-template-columns: 1fr; }
@@ -322,7 +461,8 @@
             </div>
             <div class="pill-tabs">
                 <button class="pill-tab active" data-tab="week" onclick="switchTab('week')">This Week</button>
-                <button class="pill-tab" data-tab="month" onclick="switchTab('month')">This Month</button>
+                <button class="pill-tab" data-tab="month" onclick="switchTab('month')">Lookback</button>
+                <button class="pill-tab" data-tab="artist" onclick="switchTab('artist')">Artist Search</button>
             </div>
         </div>
 
@@ -369,31 +509,88 @@
 
             <!-- ═══════ MONTH ═══════ -->
             <div id="tab-month" class="tab-content" style="display:none;">
-                <div class="stats-row">
-                    <div class="stat-card"><div class="stat-label">Total Plays</div><div class="stat-value green" id="m-total-tracks">0</div></div>
-                    <div class="stat-card"><div class="stat-label">Unique Tracks</div><div class="stat-value" id="m-unique-tracks">0</div></div>
-                    <div class="stat-card"><div class="stat-label">Unique Artists</div><div class="stat-value" id="m-unique-artists">0</div></div>
-                    <div class="stat-card"><div class="stat-label">Avg Popularity</div><div class="stat-value" id="m-avg-popularity">0</div></div>
-                    <div class="stat-card"><div class="stat-label">Total Listening</div><div class="stat-value green" id="m-listen-time">--</div></div>
-                    <div class="stat-card"><div class="stat-label">Avg Song Length</div><div class="stat-value" id="m-avg-duration">--</div></div>
+                <div class="range-tabs">
+                    <button class="range-tab active" data-days="30" onclick="switchRange(30)">Last 30 Days</button>
+                    <button class="range-tab" data-days="60" onclick="switchRange(60)">Last 60 Days</button>
+                    <button class="range-tab" data-days="90" onclick="switchRange(90)">Last 90 Days</button>
+                </div>
+                <div id="monthComingSoon" class="coming-soon" style="display:none;">
+                    <div class="coming-soon-icon">90</div>
+                    <div class="coming-soon-title">Coming Soon</div>
+                    <p>Not enough listening history yet for 90 days. Keep listening and check back later!</p>
                 </div>
 
-                <h2 class="section-title">Charts</h2>
-                <div class="charts-grid">
-                    <div class="chart-card"><h3>Top Tracks</h3><div class="chart-wrap tall"><canvas id="mTracksChart"></canvas></div></div>
-                    <div class="chart-card"><h3>Top Artists</h3><div class="chart-wrap tall"><canvas id="mArtistsChart"></canvas></div></div>
-                    <div class="chart-card"><h3>Genre Breakdown</h3><div class="chart-wrap"><canvas id="mGenresChart"></canvas></div></div>
-                    <div class="chart-card"><h3>Listening by Hour</h3><div class="chart-wrap"><canvas id="mHourlyChart"></canvas></div></div>
-                    <div class="chart-card full"><h3>Daily Listening (30 Days)</h3><div class="chart-wrap"><canvas id="mActivityChart"></canvas></div></div>
+                <div id="monthContent">
+                    <div class="stats-row">
+                        <div class="stat-card"><div class="stat-label">Total Plays</div><div class="stat-value green" id="m-total-tracks">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Unique Tracks</div><div class="stat-value" id="m-unique-tracks">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Unique Artists</div><div class="stat-value" id="m-unique-artists">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Avg Popularity</div><div class="stat-value" id="m-avg-popularity">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Total Listening</div><div class="stat-value green" id="m-listen-time">--</div></div>
+                        <div class="stat-card"><div class="stat-label">Avg Song Length</div><div class="stat-value" id="m-avg-duration">--</div></div>
+                    </div>
+
+                    <h2 class="section-title">Charts</h2>
+                    <div class="charts-grid">
+                        <div class="chart-card"><h3>Top Tracks</h3><div class="chart-wrap tall"><canvas id="mTracksChart"></canvas></div></div>
+                        <div class="chart-card"><h3>Top Artists</h3><div class="chart-wrap tall"><canvas id="mArtistsChart"></canvas></div></div>
+                        <div class="chart-card"><h3>Genre Breakdown</h3><div class="chart-wrap"><canvas id="mGenresChart"></canvas></div></div>
+                        <div class="chart-card"><h3>Listening by Hour</h3><div class="chart-wrap"><canvas id="mHourlyChart"></canvas></div></div>
+                        <div class="chart-card full"><h3 id="mActivityTitle">Daily Listening</h3><div class="chart-wrap"><canvas id="mActivityChart"></canvas></div></div>
+                    </div>
+
+                    <div class="table-card">
+                        <h3>Recent Plays</h3>
+                        <div class="table-scroll">
+                            <table><thead><tr>
+                                <th>Track</th><th>Artist</th><th>Album</th>
+                                <th>Duration</th><th>Released</th><th>Popularity</th><th>Genres</th><th>Played At</th>
+                            </tr></thead><tbody id="mTableBody"></tbody></table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════ ARTIST SEARCH ═══════ -->
+            <div id="tab-artist" class="tab-content" style="display:none;">
+                <div class="artist-search-bar">
+                    <div class="artist-search-wrap">
+                        <input type="text" id="artistInput" placeholder="Search for an artist..." autocomplete="off">
+                        <div class="artist-dropdown" id="artistDropdown"></div>
+                    </div>
+                    <button onclick="searchArtist()">Search</button>
                 </div>
 
-                <div class="table-card">
-                    <h3>Recent Plays</h3>
-                    <div class="table-scroll">
-                        <table><thead><tr>
-                            <th>Track</th><th>Artist</th><th>Album</th>
-                            <th>Duration</th><th>Released</th><th>Popularity</th><th>Genres</th><th>Played At</th>
-                        </tr></thead><tbody id="mTableBody"></tbody></table>
+                <div id="artistLoading" class="loading" style="display:none;">Searching...</div>
+                <div id="artistNoResults" class="no-results" style="display:none;">
+                    <div class="big">No results found</div>
+                    <p>Try a different artist name or check the spelling.</p>
+                </div>
+
+                <div id="artistResults" style="display:none;">
+                    <div class="stats-row">
+                        <div class="stat-card"><div class="stat-label">Total Plays</div><div class="stat-value green" id="a-total-plays">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Unique Tracks</div><div class="stat-value" id="a-unique-tracks">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Unique Albums</div><div class="stat-value" id="a-unique-albums">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Avg Popularity</div><div class="stat-value" id="a-avg-popularity">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Total Listening</div><div class="stat-value green" id="a-listen-time">--</div></div>
+                    </div>
+
+                    <h2 class="section-title">Charts</h2>
+                    <div class="charts-grid">
+                        <div class="chart-card"><h3>Top Tracks</h3><div class="chart-wrap"><canvas id="aTracksChart"></canvas></div></div>
+                        <div class="chart-card"><h3>Top Albums</h3><div class="chart-wrap"><canvas id="aAlbumsChart"></canvas></div></div>
+                        <div class="chart-card full"><h3>Listening Timeline</h3><div class="chart-wrap"><canvas id="aTimelineChart"></canvas></div></div>
+                    </div>
+
+                    <div class="table-card">
+                        <h3>All Plays</h3>
+                        <div class="table-scroll">
+                            <table><thead><tr>
+                                <th>Track</th><th>Artist</th><th>Album</th>
+                                <th>Duration</th><th>Released</th><th>Popularity</th><th>Genres</th><th>Played At</th>
+                            </tr></thead><tbody id="aTableBody"></tbody></table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -420,7 +617,8 @@
         };
 
         const charts = {};
-        const cache = { week: null, month: null };
+        const cache = { week: null, month30: null, month60: null, month90: null };
+        let currentMonthDays = 30;
 
         /* ── Tab switching ── */
         function switchTab(tab) {
@@ -430,16 +628,33 @@
             target.classList.add('active');
             target.style.display = 'block';
 
-            document.getElementById('heroTitle').textContent = tab === 'week' ? 'This Week' : 'This Month';
-            document.getElementById('heroSubtitle').textContent =
-                tab === 'week' ? 'Your last 7 days of listening' : 'Your last 30 days of listening';
-
-            if (!cache[tab]) loadTab(tab);
+            if (tab === 'artist') {
+                document.getElementById('heroTitle').textContent = 'Artist Search';
+                document.getElementById('heroSubtitle').textContent = 'Search your listening history by artist';
+                document.getElementById('loading').style.display = 'none';
+            } else if (tab === 'week') {
+                document.getElementById('heroTitle').textContent = 'This Week';
+                document.getElementById('heroSubtitle').textContent = 'Your last 7 days of listening';
+                if (!cache.week) loadTab('week');
+            } else {
+                updateMonthHero();
+                const cacheKey = 'month' + currentMonthDays;
+                if (!cache[cacheKey]) loadTab('month');
+            }
         }
 
         /* ── Data loading ── */
         async function loadTab(tab) {
-            const days = tab === 'week' ? 7 : 30;
+            const days = tab === 'week' ? 7 : currentMonthDays;
+            const cacheKey = tab === 'week' ? 'week' : 'month' + days;
+            if (cache[cacheKey]) {
+                renderTab(tab, cache[cacheKey].stats, cache[cacheKey].data);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('tab-' + tab).style.display = 'block';
+                return;
+            }
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
             try {
                 const [statsRes, dataRes] = await Promise.all([
                     fetch(`/api/stats?days=${days}`),
@@ -450,7 +665,7 @@
 
                 const stats = await statsRes.json();
                 const data  = await dataRes.json();
-                cache[tab] = { stats, data };
+                cache[cacheKey] = { stats, data };
                 renderTab(tab, stats, data);
 
                 document.getElementById('loading').style.display = 'none';
@@ -495,6 +710,7 @@
             makePolarChart('mArtistsChart', s.top_artists.map(a=>a.Artist), s.top_artists.map(a=>a['Play Count']));
             makeRadarChart('mGenresChart', s.genres.map(g=>g.Genre), s.genres.map(g=>g.Count));
             makeHourlyChart('mHourlyChart', s.hourly_activity || []);
+            document.getElementById('mActivityTitle').textContent = `Daily Listening (${currentMonthDays} Days)`;
             makeLineChart('mActivityChart', s.daily_activity.map(d=>fmtDateShort(d.Date)), s.daily_activity.map(d=>d.Count));
         }
 
@@ -686,6 +902,138 @@
         function fmtDateShort(d) {
             const [y, m, day] = d.split('-').map(Number);
             return new Date(y, m-1, day).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+        }
+
+        /* ═══════ ARTIST SEARCH ═══════ */
+        let allArtists = [];
+        let highlightIdx = -1;
+
+        // Load artist list on page load
+        fetch('/api/artists').then(r => r.json()).then(list => { allArtists = list; });
+
+        const artistInput = document.getElementById('artistInput');
+        const artistDropdown = document.getElementById('artistDropdown');
+
+        artistInput.addEventListener('input', () => {
+            const q = artistInput.value.trim().toLowerCase();
+            if (!q) { artistDropdown.classList.remove('open'); return; }
+            const matches = allArtists.filter(a => a.toLowerCase().includes(q)).slice(0, 20);
+            if (matches.length === 0) { artistDropdown.classList.remove('open'); return; }
+            highlightIdx = -1;
+            artistDropdown.innerHTML = matches.map((a, i) =>
+                `<div class="artist-dropdown-item" data-idx="${i}">${a}</div>`
+            ).join('');
+            artistDropdown.classList.add('open');
+        });
+
+        artistDropdown.addEventListener('click', e => {
+            const item = e.target.closest('.artist-dropdown-item');
+            if (!item) return;
+            artistInput.value = item.textContent;
+            artistDropdown.classList.remove('open');
+        });
+
+        artistInput.addEventListener('keydown', e => {
+            const items = artistDropdown.querySelectorAll('.artist-dropdown-item');
+            if (e.key === 'ArrowDown' && items.length) {
+                e.preventDefault();
+                highlightIdx = Math.min(highlightIdx + 1, items.length - 1);
+                items.forEach((it, i) => it.classList.toggle('highlighted', i === highlightIdx));
+                items[highlightIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp' && items.length) {
+                e.preventDefault();
+                highlightIdx = Math.max(highlightIdx - 1, 0);
+                items.forEach((it, i) => it.classList.toggle('highlighted', i === highlightIdx));
+                items[highlightIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                if (highlightIdx >= 0 && items[highlightIdx]) {
+                    artistInput.value = items[highlightIdx].textContent;
+                    artistDropdown.classList.remove('open');
+                }
+                searchArtist();
+            } else if (e.key === 'Escape') {
+                artistDropdown.classList.remove('open');
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.artist-search-wrap')) artistDropdown.classList.remove('open');
+        });
+
+        async function searchArtist() {
+            const name = artistInput.value.trim();
+            if (!name) return;
+            artistDropdown.classList.remove('open');
+
+            document.getElementById('artistResults').style.display = 'none';
+            document.getElementById('artistNoResults').style.display = 'none';
+            document.getElementById('artistLoading').style.display = 'block';
+
+            try {
+                const res = await fetch(`/api/artist?name=${encodeURIComponent(name)}`);
+                const json = await res.json();
+                document.getElementById('artistLoading').style.display = 'none';
+
+                if (!json.stats || json.plays.length === 0) {
+                    document.getElementById('artistNoResults').style.display = 'block';
+                    return;
+                }
+
+                renderArtistResults(json.stats, json.plays);
+                document.getElementById('artistResults').style.display = 'block';
+            } catch (err) {
+                document.getElementById('artistLoading').style.display = 'none';
+                document.getElementById('artistNoResults').style.display = 'block';
+            }
+        }
+
+        function renderArtistResults(stats, plays) {
+            document.getElementById('a-total-plays').textContent = (stats.total_plays || 0).toLocaleString();
+            document.getElementById('a-unique-tracks').textContent = (stats.unique_tracks || 0).toLocaleString();
+            document.getElementById('a-unique-albums').textContent = (stats.unique_albums || 0).toLocaleString();
+            document.getElementById('a-avg-popularity').textContent = stats.avg_popularity || 0;
+            document.getElementById('a-listen-time').textContent = fmtTotalTime(stats.total_duration_ms);
+
+            // Top Tracks bar chart
+            makeBarChart('aTracksChart',
+                stats.top_tracks.map(t => t.Track),
+                stats.top_tracks.map(t => t['Play Count']),
+                null, false);
+
+            // Top Albums doughnut
+            makeDoughnutChart('aAlbumsChart',
+                stats.top_albums.map(a => a.Album),
+                stats.top_albums.map(a => a['Play Count']));
+
+            // Timeline line chart
+            makeLineChart('aTimelineChart',
+                stats.timeline.map(d => fmtDateShort(d.Date)),
+                stats.timeline.map(d => d.Count));
+
+            // All plays table
+            populateTable('aTableBody', plays);
+        }
+
+        /* ── Month range switching ── */
+        function updateMonthHero() {
+            document.getElementById('heroTitle').textContent = `Last ${currentMonthDays} Days`;
+            document.getElementById('heroSubtitle').textContent = `Your last ${currentMonthDays} days of listening`;
+        }
+
+        function switchRange(days) {
+            currentMonthDays = days;
+            document.querySelectorAll('.range-tab').forEach(b => b.classList.toggle('active', parseInt(b.dataset.days) === days));
+            updateMonthHero();
+            if (days === 90) {
+                document.getElementById('monthContent').style.display = 'none';
+                document.getElementById('monthComingSoon').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+            } else {
+                document.getElementById('monthComingSoon').style.display = 'none';
+                document.getElementById('monthContent').style.display = 'block';
+                loadTab('month');
+            }
         }
 
         /* ── Init ── */
