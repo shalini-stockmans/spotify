@@ -467,7 +467,7 @@ def get_stats():
     
     # Weekly breakdown (useful for monthly view)
     df['Week'] = df['Played At'].dt.isocalendar().week.astype(int)
-    df['WeekStart'] = df['Played At'].dt.to_period('W').apply(lambda r: r.start_time).dt.strftime('%b %d')
+    df['WeekStart'] = df['Played At'].dt.tz_localize(None).dt.to_period('W').apply(lambda r: r.start_time).dt.strftime('%b %d')
     weekly_counts = df.groupby('WeekStart').size().reset_index(name='Count')
     weekly_counts.columns = ['Week', 'Count']
     
