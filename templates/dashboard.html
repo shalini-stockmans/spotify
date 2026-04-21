@@ -378,34 +378,6 @@
 
         .no-results .big { font-size: 2rem; margin-bottom: 8px; }
 
-        /* ── Coming soon ── */
-        .coming-soon {
-            text-align: center;
-            padding: 80px 20px;
-            color: var(--sp-subdued);
-        }
-
-        .coming-soon-icon {
-            font-size: 3rem;
-            font-weight: 700;
-            color: var(--sp-muted);
-            margin-bottom: 12px;
-            opacity: 0.5;
-        }
-
-        .coming-soon-title {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--sp-text);
-            margin-bottom: 8px;
-        }
-
-        .coming-soon p {
-            font-size: 0.95rem;
-            max-width: 400px;
-            margin: 0 auto;
-        }
-
         /* ── Range sub-tabs ── */
         .range-tabs {
             display: flex;
@@ -514,12 +486,6 @@
                     <button class="range-tab" data-days="60" onclick="switchRange(60)">Last 60 Days</button>
                     <button class="range-tab" data-days="90" onclick="switchRange(90)">Last 90 Days</button>
                 </div>
-                <div id="monthComingSoon" class="coming-soon" style="display:none;">
-                    <div class="coming-soon-icon">90</div>
-                    <div class="coming-soon-title">Coming Soon</div>
-                    <p>Not enough listening history yet for 90 days. Keep listening and check back later!</p>
-                </div>
-
                 <div id="monthContent">
                     <div class="stats-row">
                         <div class="stat-card"><div class="stat-label">Total Plays</div><div class="stat-value green" id="m-total-tracks">0</div></div>
@@ -1025,15 +991,7 @@
             currentMonthDays = days;
             document.querySelectorAll('.range-tab').forEach(b => b.classList.toggle('active', parseInt(b.dataset.days) === days));
             updateMonthHero();
-            if (days === 90) {
-                document.getElementById('monthContent').style.display = 'none';
-                document.getElementById('monthComingSoon').style.display = 'block';
-                document.getElementById('loading').style.display = 'none';
-            } else {
-                document.getElementById('monthComingSoon').style.display = 'none';
-                document.getElementById('monthContent').style.display = 'block';
-                loadTab('month');
-            }
+            loadTab('month');
         }
 
         /* ── Init ── */
