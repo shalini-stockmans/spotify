@@ -296,40 +296,46 @@ def sync_spotify_data():
     print(f"Sync complete: {added_count} new tracks added to database")
 
 def get_tracks_from_db(days=7):
-    """Get tracks from database for the specified number of days"""
+    """Get tracks from database for the specified number of days.
+    Pass days=None to get the full history, from the earliest record onward."""
     conn = sqlite3.connect(DB_FILE)
-    
-    # Calculate cutoff date in Central time
-    central_now = datetime.now(CENTRAL_TZ)
-    cutoff_date = (central_now - timedelta(days=days)).isoformat()
-    
+
+    where_clause = ''
+    params = ()
+    if days is not None:
+        # Calculate cutoff date in Central time
+        central_now = datetime.now(CENTRAL_TZ)
+        cutoff_date = (central_now - timedelta(days=days)).isoformat()
+        where_clause = 'WHERE played_at >= ?'
+        params = (cutoff_date,)
+
     # Try new schema first, fall back to old schema for migration
     try:
-        query = '''
-            SELECT track_id, track_name, artist_ids, artist_names, album_id, album_name, 
+        query = f'''
+            SELECT track_id, track_name, artist_ids, artist_names, album_id, album_name,
                    release_date, duration_ms, popularity, genres, played_at
             FROM listening_history
-            WHERE played_at >= ?
+            {where_clause}
             ORDER BY played_at DESC
         '''
-        df = pd.read_sql_query(query, conn, params=(cutoff_date,))
-        
+        df = pd.read_sql_query(query, conn, params=params)
+
         if not df.empty:
             # Map to dashboard-friendly column names
-            df.columns = ['Track ID', 'Track', 'Artist IDs', 'Artist', 'Album ID', 'Album', 
+            df.columns = ['Track ID', 'Track', 'Artist IDs', 'Artist', 'Album ID', 'Album',
                          'Release Date', 'Duration (ms)', 'Popularity', 'Genres', 'Played At']
     except sqlite3.OperationalError:
         # Fall back to old schema
-        query = '''
+        query = f'''
             SELECT track, artist, album, release_date, popularity, genres, played_at
             FROM listening_history
-            WHERE played_at >= ?
+            {where_clause}
             ORDER BY played_at DESC
         '''
-        df = pd.read_sql_query(query, conn, params=(cutoff_date,))
+        df = pd.read_sql_query(query, conn, params=params)
         if not df.empty:
             df.columns = ['Track', 'Artist', 'Album', 'Release Date', 'Popularity', 'Genres', 'Played At']
-    
+
     conn.close()
     
     if df.empty:
@@ -390,52 +396,63 @@ def dashboard():
     """Render the main dashboard page"""
     return render_template('dashboard.html')
 
+def parse_days_param():
+    """Parse the ?days= query param. Returns None (meaning 'all time') for days=all,
+    otherwise an int clamped to [1, 365]."""
+    raw = request.args.get('days', '7')
+    if raw == 'all':
+        return None
+    try:
+        return max(1, min(int(raw), 365))
+    except (TypeError, ValueError):
+        return 7
+
 @app.route('/api/data')
 def get_data():
-    """API endpoint to get listening data from database. Accepts ?days=7 or ?days=30"""
-    days = request.args.get('days', 7, type=int)
-    days = max(1, min(days, 365))
+    """API endpoint to get listening data from database. Accepts ?days=7, ?days=30, or ?days=all"""
+    days = parse_days_param()
 
     df = get_tracks_from_db(days=days)
-    
+
     if df.empty:
         return jsonify({
-            'error': f'No data available for the last {days} days.'
+            'error': 'No data available.' if days is None else f'No data available for the last {days} days.'
         }), 404
-    
+
     df = df.copy()
     for col in df.columns:
         if df[col].dtype == 'object':
             df[col] = df[col].fillna('')
         else:
             df[col] = df[col].fillna(0)
-    
+
     data = df.to_dict('records')
     cleaned_data = [clean_for_json(record) for record in data]
-    
-    recent_count = 15 if days <= 7 else 25
+
+    recent_count = 15 if (days is not None and days <= 7) else 25
     recent = cleaned_data[:recent_count] if len(cleaned_data) > recent_count else cleaned_data
-    
+
+    range_start = df['Played At'].min().isoformat() if days is None else (datetime.now() - timedelta(days=days)).isoformat()
+
     return jsonify({
         'data': cleaned_data,
         'recent_plays': recent,
         'total_tracks': len(df),
         'date_range': {
-            'start': (datetime.now() - timedelta(days=days)).isoformat(),
+            'start': range_start,
             'end': datetime.now().isoformat()
         }
     })
 
 @app.route('/api/stats')
 def get_stats():
-    """API endpoint to get aggregated statistics. Accepts ?days=7 or ?days=30"""
-    days = request.args.get('days', 7, type=int)
-    days = max(1, min(days, 365))
+    """API endpoint to get aggregated statistics. Accepts ?days=7, ?days=30, or ?days=all"""
+    days = parse_days_param()
 
     df = get_tracks_from_db(days=days)
-    
+
     if df.empty:
-        return jsonify({'error': f'No data available for the last {days} days.'}), 404
+        return jsonify({'error': 'No data available.' if days is None else f'No data available for the last {days} days.'}), 404
     
     top_tracks = df.groupby(['Track', 'Artist']).size().reset_index(name='Play Count')
     top_tracks = top_tracks.sort_values('Play Count', ascending=False).head(10)

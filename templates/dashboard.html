@@ -485,6 +485,7 @@
                     <button class="range-tab active" data-days="30" onclick="switchRange(30)">Last 30 Days</button>
                     <button class="range-tab" data-days="60" onclick="switchRange(60)">Last 60 Days</button>
                     <button class="range-tab" data-days="90" onclick="switchRange(90)">Last 90 Days</button>
+                    <button class="range-tab" data-days="all" onclick="switchRange('all')">All Time</button>
                 </div>
                 <div id="monthContent">
                     <div class="stats-row">
@@ -583,7 +584,7 @@
         };
 
         const charts = {};
-        const cache = { week: null, month30: null, month60: null, month90: null };
+        const cache = { week: null, month30: null, month60: null, month90: null, monthall: null };
         let currentMonthDays = 30;
 
         /* ── Tab switching ── */
@@ -676,7 +677,7 @@
             makePolarChart('mArtistsChart', s.top_artists.map(a=>a.Artist), s.top_artists.map(a=>a['Play Count']));
             makeRadarChart('mGenresChart', s.genres.map(g=>g.Genre), s.genres.map(g=>g.Count));
             makeHourlyChart('mHourlyChart', s.hourly_activity || []);
-            document.getElementById('mActivityTitle').textContent = `Daily Listening (${currentMonthDays} Days)`;
+            document.getElementById('mActivityTitle').textContent = currentMonthDays === 'all' ? 'Daily Listening (All Time)' : `Daily Listening (${currentMonthDays} Days)`;
             makeLineChart('mActivityChart', s.daily_activity.map(d=>fmtDateShort(d.Date)), s.daily_activity.map(d=>d.Count));
         }
 
@@ -983,13 +984,18 @@
 
         /* ── Month range switching ── */
         function updateMonthHero() {
-            document.getElementById('heroTitle').textContent = `Last ${currentMonthDays} Days`;
-            document.getElementById('heroSubtitle').textContent = `Your last ${currentMonthDays} days of listening`;
+            if (currentMonthDays === 'all') {
+                document.getElementById('heroTitle').textContent = 'All Time';
+                document.getElementById('heroSubtitle').textContent = 'Your entire listening history';
+            } else {
+                document.getElementById('heroTitle').textContent = `Last ${currentMonthDays} Days`;
+                document.getElementById('heroSubtitle').textContent = `Your last ${currentMonthDays} days of listening`;
+            }
         }
 
         function switchRange(days) {
             currentMonthDays = days;
-            document.querySelectorAll('.range-tab').forEach(b => b.classList.toggle('active', parseInt(b.dataset.days) === days));
+            document.querySelectorAll('.range-tab').forEach(b => b.classList.toggle('active', b.dataset.days === String(days)));
             updateMonthHero();
             loadTab('month');
         }
